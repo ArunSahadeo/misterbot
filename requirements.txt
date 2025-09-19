@@ -1,0 +1,5 @@
+bs4==0.0.2
+playwright==1.53.0
+requests==2.32.4
+user_agent==0.1.10
+yfinance==0.2.65

@@ -1,0 +1,12 @@
+{
+		"server": "irc.libera.chat",
+		"port": 6697,
+		"nickname": "misterbot",
+		"sasl_username": "misterbot",
+		"sasl_password": "ENTER_PASSWORD_HERE",
+		"channels": [
+				"##channelone",
+				"##channeltwo",
+				"##channelthree"
+		]
+}
