@@ -455,6 +455,7 @@ class IRCBot(irc.client.SimpleIRCClient):
 
         if ("twitter.com" in url or re.search("http(?:[s])?://x.com", url) or re.search("^x.com", url) or "xcancel.com" in url) and ("/status/" in url):
             url = re.sub(r"(?:x|twitter|xcancel)\.com", "fixupx.com", url)
+            url = re.sub(r"vxfixupx\.com", "fixupx.com", url)
 
         message = ""
 
