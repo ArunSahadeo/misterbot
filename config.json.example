@@ -5,8 +5,8 @@
 		"sasl_username": "misterbot",
 		"sasl_password": "ENTER_PASSWORD_HERE",
 		"channels": [
-				"##channelone",
-				"##channeltwo",
-				"##channelthree"
+				"##accounting",
+				"##economics",
+				"##investments"
 		]
 }
