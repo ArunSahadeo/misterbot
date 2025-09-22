@@ -16,9 +16,11 @@ import yfinance as yf
 from multiprocessing import Process, Queue
 from playwright.sync_api import sync_playwright, TimeoutError
 from playwright._impl._errors import Error as PlaywrightError
+from playwright_stealth.stealth import Stealth
 import math
 import sys
 import json
+import random
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -186,7 +188,8 @@ class IRCBot(irc.client.SimpleIRCClient):
 
         if raw_message.startswith('PING '):
             ping_arg = re.sub(r"^PING ", "", raw_message)
-            pong_response = f":{ping_arg}" if not ping_arg.startswith(":") else ping_arg
+            #pong_response = f":{ping_arg}" if not ping_arg.startswith(":") else ping_arg
+            pong_response = ping_arg
             connection.pong(pong_response)
             logger.debug(f"Received PING {ping_arg}, sent PONG {pong_response}, as a raw message.")
 
@@ -204,7 +207,8 @@ class IRCBot(irc.client.SimpleIRCClient):
 
     def on_ping(self, connection, event):
         ping_arg = event.arguments[0]
-        pong_response = f":{ping_arg}" if not ping_arg.startswith(":") else ping_arg
+        #pong_response = f":{ping_arg}" if not ping_arg.startswith(":") else ping_arg
+        pong_response = ping_arg
         connection.pong(pong_response)
         logger.debug(f"Received PING {ping_arg}, sent PONG {pong_response}")
 
@@ -269,6 +273,14 @@ class IRCBot(irc.client.SimpleIRCClient):
             for url in urls:
                 self.output_link(url, connection, channel)
 
+    def human_like_interaction(self, page):
+        page.mouse.move(100, 100)
+        time.sleep(random.uniform(0.5, 1.5))
+        page.mouse.move(200, 300)
+        time.sleep(random.uniform(0.5, 1.5))
+        page.evaluate("window.scrollBy(0, window.innerHeight / 2)")
+        time.sleep(random.uniform(1, 2))
+
     def run_playwright(self, url, queue):
         """Run Playwright in a separate process to fetch page metadata."""
         try:
@@ -278,21 +290,29 @@ class IRCBot(irc.client.SimpleIRCClient):
                     user_agent=(
                         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                         "AppleWebKit/537.36 (KHTML, like Gecko) "
-                        "Chrome/115.0.0.0 Safari/537.36"
+                        "Chrome/140.0.0.0 Safari/537.36"
                     ),
-                    locale="en-US",
-                    viewport={"width": 1280, "height": 800},
+                    locale="en-GB",
+                    viewport={"width": 1280, "height": math.floor(random.random() * 100)},
                     java_script_enabled=True,
                     color_scheme="light",
-                    timezone_id="America/New_York",
+                    timezone_id="Europe/Paris",
                 )
                 page = context.new_page()
+                stealth_manager = Stealth()
+                stealth_manager.apply_stealth_sync(page)
                 tempdir = tempfile.gettempdir()
+                is_document = False
 
                 try:
                     response = page.goto(url, wait_until="networkidle", timeout=10000)
                 except PlaywrightError:
                     response = page.request.get(url, timeout=10000)
+                    is_document = True
+
+                if not is_document:
+                    self.human_like_interaction(page)
+                    page.reload()
 
                 content_type = response.headers.get("content-type", "")
                 basename = os.path.basename(url)
@@ -442,6 +462,12 @@ class IRCBot(irc.client.SimpleIRCClient):
                     message = f"[ {page_title} ]"
 
                 page.screenshot(path="screenshot.png", full_page=True, timeout=10000)
+                html = page.content()
+
+                with open('./html.txt', 'w') as html_file:
+                    print(html, file=html_file)
+                    html_file.close()
+
                 browser.close()
                 queue.put(message)
         except Exception as e:
