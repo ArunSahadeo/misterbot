@@ -21,6 +21,7 @@ import math
 import sys
 import json
 import random
+import traceback
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -992,22 +993,48 @@ class IRCBot(irc.client.SimpleIRCClient):
 
         data = stock.info
         summary = data.get("longBusinessSummary")
-        message = summary
+
+        message = summary.strip()
         message_2 = ''
         message_3 = ''
         message_4 = ''
+        message_5 = ''
 
-        if len(message.encode('utf-8')) > 512:
-            message_2 = message[447:]
-            message = message[:447] + '...'
+        if len(message.encode('utf-8')) > 451:
+            message_2 = message[450:]
+            message_2 = message_2.strip()
 
-        if len(message_2.encode('utf-8')) > 512:
-            message_3 = message_2[447:]
-            message_2 = message_2[:447] + '...'
+            if re.match(r"[-\. ,]", message[-1]) and not re.match(r"[,]", message_2[0]):
+                message = message[:450] + '-'
+            else:
+                message = message[:450]
 
-        if len(message_3.encode('utf-8')) > 512:
-            message_4 = message_3[447:]
-            message_3 = message_3[:447] + '...'
+        if len(message_2.encode('utf-8')) > 451:
+            message_3 = message_2[450:]
+            message_3 = message_3.strip()
+
+            if re.match(r"[-\. !,]", message_2[-1]) and not re.match(r"[,]", message_3[0]):
+                message_2 = message_2[:450] + '-'
+            else:
+                message_2 = message_2[:450]
+
+        if len(message_3.encode('utf-8')) > 451:
+            message_4 = message_3[450:]
+            message_4 = message_4.strip()
+
+            if re.match(r"[-\. !],", message_3[-1]) and not re.match(r"[,]", message_4[0]):
+                message_3 = message_3[:450] + '-'
+            else:
+                message_3 = message_3[:450]
+
+        if len(message_4.encode('utf-8')) > 451:
+            message_5 = message_4[450:]
+            message_5 = message_5.strip()
+
+            if re.match(r"[-\. ,]", message_4[-1]) and not re.match(r"[,]", message_5[0]):
+                message_4 = message_4[:450] + '-'
+            else:
+                message_4 = message_4[:450]
 
         connection.privmsg(channel, message)
 
@@ -1019,6 +1046,9 @@ class IRCBot(irc.client.SimpleIRCClient):
 
         if len('message_4') > 0:
             connection.privmsg(channel, message_4)
+
+        if len('message_5') > 0:
+            connection.privmsg(channel, message_5)
 
     def handle_conversion(self, connection, sender, message, channel):
         """Handle !convert command."""
