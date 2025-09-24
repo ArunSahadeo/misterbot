@@ -892,15 +892,7 @@ class IRCBot(irc.client.SimpleIRCClient):
             ticker = re.sub(r"^\$", "", ticker)
 
         stock = yf.Ticker(ticker)
-
         data = stock.info
-
-        '''
-        with open('./' + ticker.lower() + '.txt', 'w') as ticker_dump_file:
-            print(data, file=ticker_dump_file)
-            ticker_dump_file.close()
-        '''
-
         price = data.get("currentPrice")
 
         if price is None:
@@ -1001,12 +993,32 @@ class IRCBot(irc.client.SimpleIRCClient):
         data = stock.info
         summary = data.get("longBusinessSummary")
         message = summary
+        message_2 = ''
+        message_3 = ''
+        message_4 = ''
 
         if len(message.encode('utf-8')) > 512:
-            #message = message.encode('utf-8')[:479].decode('utf-8', 'ignore') + '...'
+            message_2 = message[447:]
             message = message[:447] + '...'
 
+        if len(message_2.encode('utf-8')) > 512:
+            message_3 = message_2[447:]
+            message_2 = message_2[:447] + '...'
+
+        if len(message_3.encode('utf-8')) > 512:
+            message_4 = message_3[447:]
+            message_3 = message_3[:447] + '...'
+
         connection.privmsg(channel, message)
+
+        if len('message_2') > 0:
+            connection.privmsg(channel, message_2)
+
+        if len('message_3') > 0:
+            connection.privmsg(channel, message_3)
+
+        if len('message_4') > 0:
+            connection.privmsg(channel, message_4)
 
     def handle_conversion(self, connection, sender, message, channel):
         """Handle !convert command."""
