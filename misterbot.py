@@ -217,6 +217,7 @@ class IRCBot(irc.client.SimpleIRCClient):
         """Called when bot disconnects."""
         logger.error("Disconnected from server")
         self.sasl_authenticated = False
+        main()
 
     def on_sasl_authenticated(self, connection, event):
         """Called when SASL authentication succeeds."""
