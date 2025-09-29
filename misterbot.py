@@ -463,7 +463,11 @@ class IRCBot(irc.client.SimpleIRCClient):
                 if len(message) < 1:
                     message = f"[ {page_title} ]"
 
-                page.screenshot(path="screenshot.png", full_page=True, timeout=10000)
+                try:
+                    page.screenshot(path="screenshot.png", full_page=True, timeout=10000)
+                except:
+                    pass
+
                 html = page.content()
 
                 with open('./html.txt', 'w') as html_file:
@@ -513,6 +517,7 @@ class IRCBot(irc.client.SimpleIRCClient):
             connection.privmsg(channel, f"Timeout processing {url}")
             return
         message = queue.get()
+        message = message.replace("\n", "")
 
         try:
             connection.privmsg(channel, f"{message}")
