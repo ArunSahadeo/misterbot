@@ -439,9 +439,20 @@ class IRCBot(irc.client.SimpleIRCClient):
                         logger.debug("✅ Found main channel name")
                         channel_element = page.query_selector('ytd-channel-name a')
                         title = page_title
+
                         if channel_element:
+                            logger.debug("✅ Found main channel name element")
                             channel_name = channel_element.inner_text().strip()
-                            title = re.sub(r" - YouTube", " - " + channel_name, title)
+                            new_title = re.sub(r"- YouTube$", "- " + channel_name, title)
+
+                            if title != new_title:
+                                title = new_title
+
+                            if title.startswith('-'):
+                                title_element = page.query_selector('#title > h1 > yt-formatted-string')
+                                title_element_text = title_element.inner_text().strip()
+                                title = title_element_text + ' ' + title
+
                         message = f"[ {title} ]"
                     except TimeoutError:
                         logger.debug("Timeout waiting for YouTube channel name.")
