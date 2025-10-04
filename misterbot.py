@@ -866,7 +866,7 @@ class IRCBot(irc.client.SimpleIRCClient):
                 one_hour_percent_change_element = re.sub('<[^<]+?>', '', one_hour_percent_change_element)
                 one_hour_percent_change = one_hour_percent_change_element
 
-                message = f"{ticker.upper()}: {name} | {price} | {relative_change_format_start}{one_hour_percent_change}{relative_change_format_end}"
+                message = f"{ticker.upper()}: {name} | {price} | {relative_change_format_start}{one_hour_percent_change}{relative_change_format_end} (1hr)"
         except Exception as e:
             return [f"Couldn't fetch coin data for {ticker}: {str(e)}"]
 
