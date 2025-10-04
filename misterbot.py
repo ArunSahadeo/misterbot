@@ -22,6 +22,7 @@ import sys
 import json
 import random
 import traceback
+from lxml import etree, html
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -58,6 +59,8 @@ class IRCBot(irc.client.SimpleIRCClient):
             '.yields': self.handle_bond_prices,
             '.oil': self.handle_oil_prices,
             '.currency': self.handle_currency_prices,
+            '.crypto': self.handle_crypto_prices,
+            '.c': self.handle_crypto_prices
         }
         # Flag to track SASL success
 
@@ -818,6 +821,55 @@ class IRCBot(irc.client.SimpleIRCClient):
             except Exception as e:
                 logger.debug(f"Exception querying currency pair {currency['name']} from {url}")
             
+        connection.privmsg(channel, message)
+
+    def handle_crypto_prices(self, connection, sender, message, channel):
+        """Handle .crypto command."""
+
+        ticker = re.sub(r"^\.(crypto|c) ", "", message)
+
+        if re.match("^\$", ticker):
+            ticker = re.sub(r"^\$", "", ticker)
+
+        message = ""
+        url = "https://coinmarketcap.com/"
+
+        try:
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/117.0.0.0 Safari/537.36'
+            }
+
+            response = requests.get(url, headers=headers)
+
+            if response.status_code == 200:
+                tree = html.fromstring(response.text)
+                price = tree.xpath(f"//p[contains(@class, 'coin-item-symbol') and text() = '{ticker.upper()}']/ancestor::td/following-sibling::td[1]")[0]
+                name = tree.xpath(f"//p[contains(@class, 'coin-item-symbol') and text() = '{ticker.upper()}']/parent::div/preceding-sibling::p/text()")[0]
+                one_hour_percent_change = tree.xpath(f"//p[contains(@class, 'coin-item-symbol') and text() = '{ticker.upper()}']/ancestor::td/following-sibling::td[2]")[0]
+                one_hour_percent_change_element = etree.tostring(one_hour_percent_change)
+                one_hour_percent_change_element = one_hour_percent_change_element.decode('ascii')
+                price_element = etree.tostring(price)
+                price_element = price_element.decode('ascii')
+                price_element = re.sub('<[^<]+?>', '', price_element)
+                price = price_element
+
+                relative_change_format_start = ""
+                relative_change_format_end = ""
+
+                if 'icon-Caret-down' in one_hour_percent_change_element:
+                    relative_change_format_start = "\x034"
+                    relative_change_format_end = "\x0F"
+                else:
+                    relative_change_format_start = "\x033"
+                    relative_change_format_end = "\x0F"
+
+                one_hour_percent_change_element = re.sub('<[^<]+?>', '', one_hour_percent_change_element)
+                one_hour_percent_change = one_hour_percent_change_element
+
+                message = f"{ticker.upper()}: {name} | {price} | {relative_change_format_start}{one_hour_percent_change}{relative_change_format_end}"
+        except Exception as e:
+            return [f"Couldn't fetch coin data for {ticker}: {str(e)}"]
+
         connection.privmsg(channel, message)
 
     def handle_market_prices(self, connection, sender, message, channel):
