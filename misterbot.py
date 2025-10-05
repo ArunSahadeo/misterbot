@@ -855,8 +855,10 @@ class IRCBot(irc.client.SimpleIRCClient):
 
                 relative_change_format_start = ""
                 relative_change_format_end = ""
+                relative_change_symbol = '+'
 
                 if 'icon-Caret-down' in one_hour_percent_change_element:
+                    relative_change_symbol = '-'
                     relative_change_format_start = "\x034"
                     relative_change_format_end = "\x0F"
                 else:
@@ -866,7 +868,7 @@ class IRCBot(irc.client.SimpleIRCClient):
                 one_hour_percent_change_element = re.sub('<[^<]+?>', '', one_hour_percent_change_element)
                 one_hour_percent_change = one_hour_percent_change_element
 
-                message = f"{ticker.upper()}: {name} | {price} | {relative_change_format_start}{one_hour_percent_change}{relative_change_format_end} (1hr)"
+                message = f"{ticker.upper()}: {name} | {price} | {relative_change_format_start}{relative_change_symbol}{one_hour_percent_change}{relative_change_format_end} (1hr relative change)"
         except Exception as e:
             return [f"Couldn't fetch coin data for {ticker}: {str(e)}"]
 
