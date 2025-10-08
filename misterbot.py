@@ -60,7 +60,9 @@ class IRCBot(irc.client.SimpleIRCClient):
             '.oil': self.handle_oil_prices,
             '.currency': self.handle_currency_prices,
             '.crypto': self.handle_crypto_prices,
-            '.c': self.handle_crypto_prices
+            '.c': self.handle_crypto_prices,
+            '.futures': self.handle_futures_prices,
+            '.help': self.display_help_prompt
         }
         # Flag to track SASL success
 
@@ -274,6 +276,8 @@ class IRCBot(irc.client.SimpleIRCClient):
                 except Exception as e:
                     logger.error(f"Error handling command {command} in {channel} from on_pubmsg: {e}")
                     connection.privmsg(channel, f"Error processing command: {e}")
+            else:
+                connection.privmsg(channel, f"{command} has not been implemented yet. To view a list of available commands, type .help.")
         elif len(urls) > 0:
             for url in urls:
                 self.output_link(url, connection, channel)
@@ -874,6 +878,65 @@ class IRCBot(irc.client.SimpleIRCClient):
 
         connection.privmsg(channel, message)
 
+    def display_help_prompt(self, connection, sender, message, channel):
+        pattern = re.compile('^\.')
+        ported_commands = [ command for command in list(self.command_handlers.keys()) if pattern.match(command) and command != '.help' ]
+        message = 'Commands: ' + " ".join(ported_commands)
+        connection.privmsg(channel, message)
+
+    def handle_futures_prices(self, connection, sender, message, channel):
+        """Handle .futures command."""
+
+        futures = [
+            {
+                'index': 'ES=F',
+                'name': 'S&P 500'
+            },
+            {
+                'index': 'NQ=F',
+                'name': 'Nasdaq 100'
+            },
+            {
+                'index': 'YM=F',
+                'name': 'Mini-Dow'
+            },
+            {
+                'index': 'RTY=F',
+                'name': 'Russell 2000'
+            },
+        ]
+
+        message = ""
+
+        for future in futures:
+            stock = yf.Ticker(future['index'])
+            data = stock.info
+            price = data.get("currentPrice")
+
+            if price is None:
+                price = data.get("regularMarketPrice")
+
+            previous_price = data.get("regularMarketPreviousClose", 0.0)
+            relative_change = ((price / previous_price) - 1.0) * 100.0
+
+            relative_change_percent_symbol = ''
+            relative_change_format_start = ''
+            relative_change_format_end = ''
+
+            if relative_change > 0:
+                relative_change_percent_symbol = '+'
+                relative_change_format_start = "\x033"
+                relative_change_format_end = "\x0F"
+            elif relative_change < 0:
+                relative_change_format_start = "\x034"
+                relative_change_format_end = "\x0F"
+
+            if len(message) < 1:
+                message += f"{future['name']}: {price} {relative_change_format_start}{relative_change}{relative_change_format_end}"
+            else:
+                message += f" {future['name']}: {price} {relative_change_format_start}{relative_change}{relative_change_format_end}"
+        connection.privmsg(channel, message)
+
     def handle_market_prices(self, connection, sender, message, channel):
         """Handle .market / .markets command."""
 
@@ -953,8 +1016,6 @@ class IRCBot(irc.client.SimpleIRCClient):
 
     def handle_stock_quote(self, connection, sender, message, channel):
         """Handle !quote / .q command."""
-
-        import yfinance as yf
 
         ticker = re.sub(r"^!quote ", "", message)
         ticker = re.sub(r"^\.q ", "", message)
@@ -1051,8 +1112,6 @@ class IRCBot(irc.client.SimpleIRCClient):
 
     def handle_stock_info(self, connection, sender, message, channel):
         """Handle .t command."""
-
-        import yfinance as yf
 
         ticker = re.sub(r"^\.t ", "", message)
         ticker = re.sub(r"^ ", "", ticker)
