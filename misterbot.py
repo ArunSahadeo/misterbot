@@ -931,6 +931,12 @@ class IRCBot(irc.client.SimpleIRCClient):
                 relative_change_format_start = "\x034"
                 relative_change_format_end = "\x0F"
 
+            relative_change = round(relative_change, 2)
+            decimal_places = re.sub(r"\-?[0-9]{1,}\.", "", str(relative_change))
+
+            if len(decimal_places) < 2:
+                relative_change = str(relative_change) + '0'
+
             if len(message) < 1:
                 message += f"{future['name']}: {price} {relative_change_format_start}{relative_change}{relative_change_format_end}"
             else:
