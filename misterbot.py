@@ -358,9 +358,28 @@ class IRCBot(irc.client.SimpleIRCClient):
 
                 page_title = page.title()
                 default_title = ""
+                actual_url = page.url
+
+                if "consent.yahoo.com" in actual_url:
+                    try:
+                        page.wait_for_selector("//button[contains(@class,'accept-all')]", timeout=15000)
+                        logger.debug("✅ Found Yahoo popup accept cookies button")
+                        accept_all_button = page.locator("//button[contains(@class,'accept-all')]")
+
+                        with page.expect_navigation(wait_until="domcontentloaded", timeout=30000):
+                            page.evaluate('''accept_all_button => {
+                                accept_all_button.click()
+                            }''', accept_all_button.element_handle())
+                    
+                        logger.debug("✅ Clicked Yahoo popup accept cookies button")
+                        title = page.title()
+                        message = f"[ {title} ]"
+                    except TimeoutError:
+                        logger.debug("Timeout waiting for Yahoo page to redirect.")
 
                 if "x.com" in url and "fixupx.com" not in url:
                     logger.debug(f"The page title: {page_title}")
+
                     try:
                         page.wait_for_selector("[data-testid=\"UserName\"]", timeout=15000)
                         logger.debug("✅ Found tweeter username")
