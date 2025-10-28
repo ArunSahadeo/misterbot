@@ -4,3 +4,4 @@ ollama.py
 config.json
 *.orig
 html.txt
+/config.json.current
