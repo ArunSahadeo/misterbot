@@ -267,7 +267,7 @@ class IRCBot(irc.client.SimpleIRCClient):
                     self.command_handlers[command](connection, sender, message, channel)
                 except Exception as e:
                     logger.error(f"Error handling command {command} in {channel} from on_pubmsg: {e}")
-                    connection.privmsg(channel, f"Error processing command: {e}")
+                    connection.privmsg(channel, f"Error processing command {command}: {e}")
         elif re.match('^\.[a-z]{1,}', message):
             command = message.split()[0]
             if command in self.command_handlers:
@@ -275,7 +275,9 @@ class IRCBot(irc.client.SimpleIRCClient):
                     self.command_handlers[command](connection, sender, message, channel)
                 except Exception as e:
                     logger.error(f"Error handling command {command} in {channel} from on_pubmsg: {e}")
-                    connection.privmsg(channel, f"Error processing command: {e}")
+                    str_traceback = traceback.format_exc()
+                    logger.error(f"Traceback: {str_traceback}")
+                    connection.privmsg(channel, f"Error processing command {command}: {e}")
             else:
                 connection.privmsg(channel, f"{command} has not been implemented yet. To view a list of available commands, type .help.")
         elif len(urls) > 0:
@@ -1055,6 +1057,10 @@ class IRCBot(irc.client.SimpleIRCClient):
 
         if price is None:
             price = data.get("regularMarketPrice")
+
+        if price is None:
+            connection.privmsg(channel, f"Data not available for ticker: {ticker}.")
+            return
 
         previous_price = data.get("regularMarketPreviousClose", 0.0)
         relative_change = ((price / previous_price) - 1.0) * 100.0
