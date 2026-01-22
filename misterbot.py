@@ -1091,7 +1091,7 @@ class IRCBot(irc.client.SimpleIRCClient):
         if "was founded " in long_summary or "was established " or "was incorporated ":
             year_founded_text = re.sub(r".*?(?:founded|incorporated|established) (?:in|on) (\d+).+?$", r"\1", long_summary)
 
-            if year_founded_text != long_summary and isinstance(year_founded, int):
+            if year_founded_text != long_summary and isinstance(year_founded_text, int):
                 year_founded = int(year_founded_text)
 
         if not isinstance(year_founded, int) and fund_inception_date:
