@@ -11,7 +11,7 @@ from user_agent import generate_user_agent
 import tempfile
 import os
 import time
-from urllib.parse import urlparse, quote
+from urllib.parse import urlparse, quote, quote_plus
 import yfinance as yf
 from multiprocessing import Process, Queue
 from playwright.sync_api import sync_playwright, TimeoutError
@@ -703,19 +703,19 @@ class IRCBot(irc.client.SimpleIRCClient):
 
         oil_indices = [
             {
-                'index': '@CL.1',
+                'index': 'WTI Crude Oil',
                 'name': 'WTI Crude'
             },
             {
-                'index': '@LCO.1',
+                'index': 'Brent Crude Oil',
                 'name': 'ICE Brent Crude',
             },
             {
-                'index': '@NG.1',
+                'index': 'Natural Gas',
                 'name': 'Nat Gas'
             },
             {
-                'index': '@RB.1',
+                'index': 'RBOB Gasoline',
                 'name': 'RBOB Gas',
             },
         ]
@@ -723,7 +723,7 @@ class IRCBot(irc.client.SimpleIRCClient):
         message = ""
 
         for oil_index in oil_indices:
-            url = f"https://www.cnbc.com/quotes/{quote(oil_index['index'])}"
+            url = f"https://markets.ft.com/data/commodities/tearsheet/summary?c={quote_plus(oil_index['index'])}"
 
             try:
                 headers = {
@@ -735,14 +735,14 @@ class IRCBot(irc.client.SimpleIRCClient):
                 if response.status_code == 200:
                     html = response.text
                     soup = BeautifulSoup(html, "html.parser")
-                    price = soup.select('.QuoteStrip-lastPrice')
-                    relative_change = soup.select('.QuoteStrip-lastPriceStripContainer > *:last-child > *:last-child')
+                    price = soup.select('.mod-tearsheet-overview__quote__bar > li:first-child .mod-ui-data-list__value')
+                    relative_change = soup.select('.mod-tearsheet-overview__quote__bar > li:nth-child(2) .mod-ui-data-list__value')
 
                     if len(price) < 1 or len(relative_change) < 1:
                         continue
 
                     price = str(price[0].text).strip()
-                    relative_change = str(relative_change[0].text).strip().replace('(', '').replace(')', '')
+                    relative_change = str(relative_change[0].text).split('/')[1].strip()
 
                     relative_change_format_start = ""
                     relative_change_format_end = ""
