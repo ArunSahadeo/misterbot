@@ -1140,6 +1140,10 @@ class IRCBot(irc.client.SimpleIRCClient):
             relative_change_format_end = "\x0F"
 
         message = f"{ticker}: {format(price, '.2f')} {absolute_change_format_start}{absolute_change_symbol}{format(absolute_change, '.2f')}{absolute_change_format_end} {relative_change_format_start}{relative_change_percent_symbol}{format(relative_change, '.2f')}%{relative_change_format_end} AH: {after_hours_change_format_start}{after_hours_change_percent_symbol}{format(after_hours_change_percent, '.2f')}%{after_hours_change_format_end} | {stock_name} (Industry: {industry}) (Sector: {sector}) (Exchange: {exchange}) | Div: {dividend} | P/E: {pe_ratio} | MCap: {self.format_number(market_cap)} | 52WR: {fifty_two_week_range} | V: {volume} | Year Founded: {year_founded}"
+
+        if 'N/A' in industry and 'N/A' in sector:
+            logger.debug(f"Supposedly unavailable ticker data: {str(data)}")
+
         connection.privmsg(channel, message)
 
     def handle_stock_info(self, connection, sender, message, channel):
