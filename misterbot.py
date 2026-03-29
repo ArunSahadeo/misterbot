@@ -1059,6 +1059,7 @@ class IRCBot(irc.client.SimpleIRCClient):
             price = data.get("regularMarketPrice")
 
         if price is None:
+            logger.debug(f"Supposedly unavailable ticker data: {str(data)}")
             connection.privmsg(channel, f"Data not available for ticker: {ticker}.")
             return
 
