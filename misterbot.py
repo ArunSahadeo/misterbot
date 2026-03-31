@@ -574,6 +574,11 @@ class IRCBot(irc.client.SimpleIRCClient):
         ticker = re.sub(r"^!news ", "", message)
         ticker = re.sub(r"^\$", "", ticker)
         logger.debug(f"The ticker: {ticker}")
+
+        if '!news' in ticker:
+            connection.privmsg(channel, "Please enter a ticker.")
+            return
+
         news_items = self.get_financial_news(ticker)
         
         for news_item in news_items:
