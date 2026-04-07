@@ -361,6 +361,13 @@ class IRCBot(irc.client.SimpleIRCClient):
                 page_title = page.title()
                 default_title = ""
                 actual_url = page.url
+                logger.debug(f"The URL: {actual_url}")
+
+                if "https://www.google.com/url?q=" in actual_url:
+                    actual_url = re.sub(r'^https:\/\/www\.google\.com\/url\?q=', '', actual_url)
+                    response = page.goto(actual_url, wait_until="networkidle", timeout=10000)
+                    actual_url = page.url
+                    page_title = page.title()
 
                 if "consent.yahoo.com" in actual_url:
                     try:
