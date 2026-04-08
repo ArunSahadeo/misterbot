@@ -1057,8 +1057,27 @@ class IRCBot(irc.client.SimpleIRCClient):
     def handle_sector_company_listings(self, connection, sender, message, channel):
         """Handle .sector command."""
 
+        valid_sectors = [
+            'basic-materials',
+            'communication-services',
+            'consumer-cyclical',
+            'consumer-defensive',
+            'energy',
+            'financial-services',
+            'healthcare',
+            'industrials',
+            'real-estate',
+            'technology',
+            'utilities'
+        ]
+
         sector_string = re.sub(r"^.sector ", "", message)
-        sector = yf.Sector(sector_string)
+ 
+        if sector_string in valid_sectors:
+            sector = yf.Sector(sector_string)
+        else:
+            sector = yf.Industry(sector_string)
+
         sector_companies = sector.top_companies
 
         formatted_lines = []
