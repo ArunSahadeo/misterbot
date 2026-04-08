@@ -50,6 +50,7 @@ class IRCBot(irc.client.SimpleIRCClient):
             '!seen': self.handle_last_seen,
             '!quote': self.handle_stock_quote,
             '.q': self.handle_stock_quote,
+            '.sector': self.handle_sector_company_listings,
             '.t': self.handle_stock_info,
             '.market': self.handle_market_prices,
             '.markets': self.handle_market_prices,
@@ -1051,6 +1052,27 @@ class IRCBot(irc.client.SimpleIRCClient):
             except Exception as e:
                 logger.debug(f"Exception querying market index {market_index['name']} from {url}")
             
+        connection.privmsg(channel, message)
+
+    def handle_sector_company_listings(self, connection, sender, message, channel):
+        """Handle .sector command."""
+
+        sector_string = re.sub(r"^.sector ", "", message)
+        sector = yf.Sector(sector_string)
+        sector_companies = sector.top_companies
+
+        formatted_lines = []
+
+        for symbol, row in sector_companies.iterrows():
+            name = row.get("name") or row.get("shortName") or "N/A"
+            name = " ".join(str(name).split())
+            formatted_lines.append(f"{symbol} ({name})")
+
+        message = " | ".join(formatted_lines[:20])
+
+        if len(message) < 1:
+            message = f"No tickers found for {sector_string}"
+
         connection.privmsg(channel, message)
 
     def handle_stock_quote(self, connection, sender, message, channel):
