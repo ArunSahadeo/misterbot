@@ -1159,6 +1159,11 @@ class IRCBot(irc.client.SimpleIRCClient):
 
         stock = yf.Ticker(ticker)
         data = stock.info
+
+        if len(data) < 2:
+            connection.privmsg(channel, f"Ticker does not exist.")
+            return
+
         price = data.get("currentPrice")
 
         if price is None:
