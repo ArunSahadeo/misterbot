@@ -1175,7 +1175,12 @@ class IRCBot(irc.client.SimpleIRCClient):
             return
 
         previous_price = data.get("regularMarketPreviousClose", 0.0)
-        relative_change = ((price / previous_price) - 1.0) * 100.0
+
+        if previous_price == 0:
+            relative_change = None
+        else:
+            relative_change = ((price / previous_price) - 1.0) * 100.0
+
         absolute_change = price - previous_price
         volume = data.get("volume", None)
         market_cap = data.get("marketCap", None)
@@ -1242,7 +1247,12 @@ class IRCBot(irc.client.SimpleIRCClient):
         relative_change_format_start = ''
         relative_change_format_end = ''
 
-        if relative_change > 0:
+        if relative_change is None:
+            relative_change_percent_symbol = ""
+            relative_change_format_start = ""
+            relative_change_format_start = ""
+            relative_change_format_end = ""
+        elif relative_change > 0:
             relative_change_percent_symbol = '+'
             relative_change_format_start = "\x033"
             relative_change_format_end = "\x0F"
@@ -1250,7 +1260,12 @@ class IRCBot(irc.client.SimpleIRCClient):
             relative_change_format_start = "\x034"
             relative_change_format_end = "\x0F"
 
-        message = f"{ticker}: {format(price, '.2f')} {absolute_change_format_start}{absolute_change_symbol}{format(absolute_change, '.2f')}{absolute_change_format_end} {relative_change_format_start}{relative_change_percent_symbol}{format(relative_change, '.2f')}%{relative_change_format_end} AH: {after_hours_change_format_start}{after_hours_change_percent_symbol}{format(after_hours_change_percent, '.2f')}%{after_hours_change_format_end} | {stock_name} (Industry: {industry}) (Sector: {sector}) (Exchange: {exchange}) | Div: {dividend} | P/E: {pe_ratio} | MCap: {self.format_number(market_cap)} | 52WR: {fifty_two_week_range} | V: {volume} | Year Founded: {year_founded}"
+        if relative_change is not None:
+            relative_change = str(format(relative_change, '.2f')) + '%'
+        else:
+            relative_change = 'N/A'
+
+        message = f"{ticker}: {format(price, '.2f')} {absolute_change_format_start}{absolute_change_symbol}{format(absolute_change, '.2f')}{absolute_change_format_end} {relative_change_format_start}{relative_change_percent_symbol}{relative_change}{relative_change_format_end} AH: {after_hours_change_format_start}{after_hours_change_percent_symbol}{format(after_hours_change_percent, '.2f')}%{after_hours_change_format_end} | {stock_name} (Industry: {industry}) (Sector: {sector}) (Exchange: {exchange}) | Div: {dividend} | P/E: {pe_ratio} | MCap: {self.format_number(market_cap)} | 52WR: {fifty_two_week_range} | V: {volume} | Year Founded: {year_founded}"
 
         if 'N/A' in industry and 'N/A' in sector:
             logger.debug(f"Supposedly unavailable ticker data: {str(data)}")
