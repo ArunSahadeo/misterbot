@@ -869,6 +869,10 @@ class IRCBot(irc.client.SimpleIRCClient):
         if re.match("^\$", ticker):
             ticker = re.sub(r"^\$", "", ticker)
 
+        if ticker == '.c' or ticker == '.crypto':
+            connection.privmsg(channel, 'Please enter a cryptocurrency ticker.')
+            return
+
         message = ""
         url = "https://coinmarketcap.com/"
 
@@ -907,6 +911,8 @@ class IRCBot(irc.client.SimpleIRCClient):
                 one_hour_percent_change = one_hour_percent_change_element
 
                 message = f"{ticker.upper()}: {name} | {price} | {absolute_change_format_start}{absolute_change_symbol}{one_hour_percent_change}{absolute_change_format_end} (1hr absolute change)"
+            else:
+                return [f"Status code {response.status_code} returned"]
         except Exception as e:
             return [f"Couldn't fetch coin data for {ticker}: {str(e)}"]
 
