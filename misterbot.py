@@ -1093,52 +1093,38 @@ class IRCBot(irc.client.SimpleIRCClient):
             name = " ".join(str(name).split())
             formatted_lines.append(f"{symbol} ({name})")
 
-        message = " | ".join(formatted_lines[:20])
+        message = " | ".join(formatted_lines[:15])
 
         if len(message) < 1:
             message = f"No tickers found for {sector_string}"
 
+        formatted_lines = formatted_lines[15:]
         message_2 = ''
         message_3 = ''
         message_4 = ''
         message_5 = ''
+        message_6 = ''
+        message_7 = ''
+        message_8 = ''
+        message_9 = ''
+        message_10 = ''
 
-        if len(message.encode('utf-8')) > 451:
-            message_2 = message[450:]
-            message_2 = message_2.strip()
+        if len(formatted_lines) > 0:
+            message_2 = " | ".join(formatted_lines[:15])
+            formatted_lines = formatted_lines[15:]
 
-            if re.match(r"[-\. ,]", message[-1]) and not re.match(r"[,]", message_2[0]):
-                message = message[:450] + '-'
-            else:
-                message = message[:450]
+        if len(formatted_lines) > 0:
+            message_3 = " | ".join(formatted_lines[:15])
+            formatted_lines = formatted_lines[15:]
 
-        if len(message_2.encode('utf-8')) > 451:
-            message_3 = message_2[450:]
-            message_3 = message_3.strip()
+        if len(formatted_lines) > 0:
+            message_4 = " | ".join(formatted_lines[:15])
+            formatted_lines = formatted_lines[15:]
 
-            if re.match(r"[-\. !,]", message_2[-1]) and not re.match(r"[,]", message_3[0]):
-                message_2 = message_2[:450] + '-'
-            else:
-                message_2 = message_2[:450]
-
-        if len(message_3.encode('utf-8')) > 451:
-            message_4 = message_3[450:]
-            message_4 = message_4.strip()
-
-            if re.match(r"[-\. !],", message_3[-1]) and not re.match(r"[,]", message_4[0]):
-                message_3 = message_3[:450] + '-'
-            else:
-                message_3 = message_3[:450]
-
-        if len(message_4.encode('utf-8')) > 451:
-            message_5 = message_4[450:]
-            message_5 = message_5.strip()
-
-            if re.match(r"[-\. ,]", message_4[-1]) and not re.match(r"[,]", message_5[0]):
-                message_4 = message_4[:450] + '-'
-            else:
-                message_4 = message_4[:450]
-
+        if len(formatted_lines) > 0:
+            message_5 = " | ".join(formatted_lines[:15])
+            formatted_lines = formatted_lines[15:]
+        
         connection.privmsg(channel, message)
 
         if len('message_2') > 0:
