@@ -1097,12 +1097,12 @@ class IRCBot(irc.client.SimpleIRCClient):
             name = " ".join(str(name).split())
             formatted_lines.append(f"{symbol} ({name})")
 
-        message = " | ".join(formatted_lines[:15])
+        message = " | ".join(formatted_lines[:10])
 
         if len(message) < 1:
             message = f"No tickers found for {sector_string}"
 
-        formatted_lines = formatted_lines[15:]
+        formatted_lines = formatted_lines[10:]
         message_2 = ''
         message_3 = ''
         message_4 = ''
@@ -1114,20 +1114,40 @@ class IRCBot(irc.client.SimpleIRCClient):
         message_10 = ''
 
         if len(formatted_lines) > 0:
-            message_2 = " | ".join(formatted_lines[:15])
-            formatted_lines = formatted_lines[15:]
+            message_2 = " | ".join(formatted_lines[:10])
+            formatted_lines = formatted_lines[10:]
 
         if len(formatted_lines) > 0:
-            message_3 = " | ".join(formatted_lines[:15])
-            formatted_lines = formatted_lines[15:]
+            message_3 = " | ".join(formatted_lines[:10])
+            formatted_lines = formatted_lines[10:]
 
         if len(formatted_lines) > 0:
-            message_4 = " | ".join(formatted_lines[:15])
-            formatted_lines = formatted_lines[15:]
+            message_4 = " | ".join(formatted_lines[:10])
+            formatted_lines = formatted_lines[10:]
 
         if len(formatted_lines) > 0:
-            message_5 = " | ".join(formatted_lines[:15])
-            formatted_lines = formatted_lines[15:]
+            message_5 = " | ".join(formatted_lines[:10])
+            formatted_lines = formatted_lines[10:]
+
+        if len(formatted_lines) > 0:
+            message_6 = " | ".join(formatted_lines[:10])
+            formatted_lines = formatted_lines[10:]
+
+        if len(formatted_lines) > 0:
+            message_7 = " | ".join(formatted_lines[:10])
+            formatted_lines = formatted_lines[10:]
+
+        if len(formatted_lines) > 0:
+            message_8 = " | ".join(formatted_lines[:10])
+            formatted_lines = formatted_lines[10:]
+
+        if len(formatted_lines) > 0:
+            message_9 = " | ".join(formatted_lines[:10])
+            formatted_lines = formatted_lines[10:]
+
+        if len(formatted_lines) > 0:
+            message_10 = " | ".join(formatted_lines[:10])
+            formatted_lines = formatted_lines[10:]
         
         connection.privmsg(channel, message)
 
@@ -1142,6 +1162,21 @@ class IRCBot(irc.client.SimpleIRCClient):
 
         if len('message_5') > 0:
             connection.privmsg(channel, message_5)
+
+        if len('message_6') > 0:
+            connection.privmsg(channel, message_6)
+
+        if len('message_7') > 0:
+            connection.privmsg(channel, message_7)
+
+        if len('message_8') > 0:
+            connection.privmsg(channel, message_8)
+
+        if len('message_9') > 0:
+            connection.privmsg(channel, message_9)
+
+        if len('message_10') > 0:
+            connection.privmsg(channel, message_10)
 
     def handle_stock_quote(self, connection, sender, message, channel):
         """Handle !quote / .q command."""
