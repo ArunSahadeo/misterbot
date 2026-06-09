@@ -3,5 +3,6 @@ screenshot.png
 ollama.py
 config.json
 *.orig
-html.txt
 /config.json.current
+/*.txt
+!/requirements.txt
