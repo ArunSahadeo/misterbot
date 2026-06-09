@@ -1,6 +1,9 @@
+import ast
+import inspect
 import irc.client
 import irc.connection
 import ssl
+import textwrap
 from datetime import datetime
 import logging
 import socket
@@ -29,6 +32,45 @@ logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %
 logger = logging.getLogger(__name__)
 
 ollama_server_url = 'http://localhost:11434/api/generate'
+
+class ClosestScopeURLVisitor(ast.NodeVisitor):
+    def __init__(self):
+        self.extracted_uris = []
+        self.current_url = None
+
+    def _resolve_joined_str(self, joined_str_node):
+        parts = []
+        for value in joined_str_node.values:
+            if isinstance(value, ast.Constant) and isinstance(value.value, str):
+                parts.append(value.value)
+            elif isinstance(value, ast.FormattedValue):
+                parts.append("{...}")
+        return "".join(parts)
+
+    def visit_Assign(self, node):
+        if len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
+            var_name = node.targets[0].id
+
+            if 'url' in var_name.lower():
+                if isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
+                    self.current_url = node.value.value
+                elif isinstance(node.value, ast.JoinedStr):
+                    self.current_url = self._resolve_joined_str(node.value)
+
+        self.generic_visit(node)
+
+    def visit_Call(self, node):
+        if isinstance(node.func, ast.Attribute) and node.func.attr == 'get':
+            if node.args:
+                first_arg = node.args[0]
+
+                if isinstance(first_arg, ast.Name):
+                    var_name = first_arg.id
+
+                    if 'url' in var_name.lower() and self.current_url is not None:
+                        self.extracted_uris.append(self.current_url)
+
+        self.generic_visit(node)
 
 class IRCBot(irc.client.SimpleIRCClient):
     def __init__(self, config):
@@ -66,6 +108,15 @@ class IRCBot(irc.client.SimpleIRCClient):
             '.help': self.display_help_prompt
         }
         # Flag to track SASL success
+
+    def extract_http_method_uris(self, source_code: str, using_yf: bool):
+        if using_yf:
+            return []
+
+        tree = ast.parse(source_code)
+        visitor = ClosestScopeURLVisitor()
+        visitor.visit(tree)
+        return visitor.extracted_uris
 
     def format_number(self, n):
         if n is None:
@@ -919,10 +970,34 @@ class IRCBot(irc.client.SimpleIRCClient):
         connection.privmsg(channel, message)
 
     def display_help_prompt(self, connection, sender, message, channel):
-        pattern = re.compile('^\.')
-        ported_commands = [ command for command in list(self.command_handlers.keys()) if pattern.match(command) and command != '.help' ]
-        message = 'Commands: ' + " ".join(ported_commands)
+        requested_command = re.sub(r"^\.help ", "", message)
+        requested_command = re.sub(r"^ ", "", requested_command)
+
+        if requested_command != '.help':
+            if requested_command in list(self.command_handlers.keys()):
+                source_code = inspect.getsource(self.command_handlers[requested_command])
+                source_code = textwrap.dedent(source_code)
+                using_yf = 'yf.' in source_code
+                extracted_uris = self.extract_http_method_uris(source_code, using_yf)
+
+                if len(extracted_uris) > 0:
+                    message = f"The following URIs are invoked: {''.join(extracted_uris)}"
+                elif using_yf:
+                    message = f"The requested command is using the Yahoo Finance API."
+                else:
+                    message = 'No URIs are invoked.'
+            else:
+                message = f'{requested_command} does not exist.'
+        else:
+            pattern = re.compile('^\.')
+            ported_commands = [ command for command in list(self.command_handlers.keys()) if pattern.match(command) and command != '.help' ]
+            message = 'Commands: ' + " ".join(ported_commands)
+            message_2 = 'You can pass any of these commands as arguments to .help to see which URLs they invoke'
+
         connection.privmsg(channel, message)
+
+        if 'message_2' in locals():
+            connection.privmsg(channel, message_2)
 
     def handle_futures_prices(self, connection, sender, message, channel):
         """Handle .futures command."""
