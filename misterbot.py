@@ -4,7 +4,7 @@ import irc.client
 import irc.connection
 import ssl
 import textwrap
-from datetime import datetime
+from datetime import datetime, timedelta
 import logging
 import socket
 import re
@@ -86,7 +86,11 @@ class IRCBot(irc.client.SimpleIRCClient):
         self.admins = config['admins']
         self.owner_email = config['owner_email']
         self.GROQ_API_KEY = config['keys']['GROQ']
-        self.GROQ_API_IS_RATE_LIMITED = False
+
+        # New robust tracking states for daily or per-minute rate limit locks
+        self.GROQ_LOCK_ACTIVE = False
+        self.GROQ_UNLOCK_TIMESTAMP = None
+
         self._channel = None
         self._target_user = None
         self.nickserv_requests = {}
@@ -378,6 +382,30 @@ class IRCBot(irc.client.SimpleIRCClient):
 
                         break
 
+    def calculate_groq_lockout(self, error_string):
+        """Parses Groq retry times and locks down the command thread natively."""
+        time_match = re.search(r"Please try again in\s+([0-9hms\.]+)", error_string, re.IGNORECASE)
+        total_seconds = 0
+
+        if time_match:
+            time_str = time_match.group(1)
+            hours = re.search(r'(\d+)h', time_str)
+            minutes = re.search(r'(\d+)m', time_str)
+            seconds = re.search(r'([\d\.]+)s', time_str)
+
+            if hours:
+                total_seconds += int(hours.group(1)) * 3600
+            if minutes:
+                total_seconds += int(minutes.group(1)) * 60
+            if seconds:
+                total_seconds += float(seconds.group(1))
+        else:
+            total_seconds = 300  # 5-minute safety threshold fallback
+
+        self.GROQ_UNLOCK_TIMESTAMP = datetime.now() + timedelta(seconds=total_seconds)
+        self.GROQ_LOCK_ACTIVE = True
+        logger.debug(f"Groq daily limit triggered. Lock active until: {self.GROQ_UNLOCK_TIMESTAMP.strftime('%H:%M:%S')}")
+
     def on_pubmsg(self, connection, event):
         """Handle public channel messages."""
         message = event.arguments[0]
@@ -397,6 +425,19 @@ class IRCBot(irc.client.SimpleIRCClient):
         elif re.match('^\.[a-z]{1,}', message):
             command = message.split()[0]
             if command in self.command_handlers:
+
+                # Check dynamic rate limit lock state prior to execution
+                if command == '.mgmt' and self.GROQ_LOCK_ACTIVE and self.GROQ_UNLOCK_TIMESTAMP:
+                    if datetime.now() < self.GROQ_UNLOCK_TIMESTAMP:
+                        remaining_delta = self.GROQ_UNLOCK_TIMESTAMP - datetime.now()
+                        mins, secs = divmod(int(remaining_delta.total_seconds()), 60)
+                        connection.privmsg(channel, f"Error: Groq API limit reached. Command .mgmt locked. Retry available in {mins:02d}:{secs:02d}.")
+                        return
+                    else:
+                        # Clear old lock cleanly if the cooldown timeline has lapsed
+                        self.GROQ_LOCK_ACTIVE = False
+                        self.GROQ_UNLOCK_TIMESTAMP = None
+
                 try:
                     self.command_handlers[command](connection, sender, message, channel)
                 except Exception as e:
@@ -406,10 +447,10 @@ class IRCBot(irc.client.SimpleIRCClient):
                         logger.error(f"Traceback: {str_traceback}")
                         connection.privmsg(channel, f"Error processing command {command}: {e}")
 
-                    if "Groq API Error" in str(e) and "429" in str(e):
-                        logger.debug("Groq API is now rate limited.")
-                        connection.privmsg(channel, "Groq API is now rate limited.")
-                        self.GROQ_API_IS_RATE_LIMITED = True
+                    # Intercept and process API structural limit exceptions thrown from our parser helper pipeline
+                    if "groq api error" in str(e).lower() and ("429" in str(e) or "rate_limit" in str(e).lower()):
+                        self.calculate_groq_lockout(str(e))
+                        connection.privmsg(channel, "Groq API daily token/request exhaustion triggered. The management command has been safely isolated.")
             else:
                 connection.privmsg(channel, f"{command} has not been implemented yet. To view a list of available commands, type .help.")
         elif len(urls) > 0:
@@ -737,35 +778,24 @@ class IRCBot(irc.client.SimpleIRCClient):
     def handle_bond_prices(self, connection, sender, message, channel):
         """Handle .bond / .bonds / .yield / .yields command."""
 
-        """
-        {
-            'index': '^IRX',
-            'name': '13W'
-        },
-        """
-
         bond_indices = [
             {
                 'index': 'US1Y',
                 'name': '1Y'
             },
             {
-                #'index': '2YY=F',
                 'index': 'US2Y',
                 'name': '2Y',
             },
             {
-                #'index': '^FVX',
                 'index': 'US5Y',
                 'name': '5Y'
             },
             {
-                #'index': '^TNX',
                 'index': 'US10Y',
                 'name': '10Y',
             },
             {
-                #'index': '^TYX',
                 'index': 'US30Y',
                 'name': '30Y'
             }
@@ -774,7 +804,6 @@ class IRCBot(irc.client.SimpleIRCClient):
         message = ""
 
         for bond in bond_indices:
-            #url = f"https://finance.yahoo.com/quote/{quote(bond['index'])}"
             url = f"https://www.cnbc.com/quotes/{quote(bond['index'])}"
 
             try:
@@ -787,26 +816,16 @@ class IRCBot(irc.client.SimpleIRCClient):
                 if response.status_code == 200:
                     html = response.text
                     soup = BeautifulSoup(html, "html.parser")
-                    #price = soup.select('[data-testid="qsp-price"]')
                     price = soup.select('h3.Summary-title + ul > li.Summary-stat:nth-child(5) > span.Summary-value')
                     bond_yield = soup.select('.QuoteStrip-lastPrice')
-                    #relative_change = soup.select('[data-testid="qsp-price-change-percent"]')
                     price_at_previous_close = soup.select('h3.Summary-title + ul > li.Summary-stat:nth-child(8) > span.Summary-value')
-                    #//h3[contains(@class, 'Summary-title') and contains(text(), 'KEY STATS')]
 
-                    #if len(price) < 1 or len(relative_change) < 1:
                     if len(price) < 1 or len(price_at_previous_close) < 1 or len(bond_yield) < 1:
                         continue
 
                     price = str(price[0].text).strip()
                     bond_yield = str(bond_yield[0].text).strip()
                     price_at_previous_close = str(price_at_previous_close[0].text).strip()
-
-                    '''
-                    relative_change = str(relative_change[0].text).strip()
-
-                    relative_change = re.sub(r'[()]', '', relative_change)
-                    '''
 
                     try:
                         current_price = float(price)
@@ -836,7 +855,7 @@ class IRCBot(irc.client.SimpleIRCClient):
                     else:
                         message += f" {bond['name']}: {price} (Price) {bond_yield} (Yield) {relative_change_format_start}{relative_change}{relative_change_format_end} (Price Change)"
                 else:
-                    logger.debug(f"Couldn't fetch bond data for {bond['name']}: {str(e)}")
+                    logger.debug(f"Couldn't fetch bond data for {bond['name']}")
             except Exception as e:
                 logger.debug(f"Exception querying bond maturity {bond['name']} from {url}")
             
@@ -903,7 +922,7 @@ class IRCBot(irc.client.SimpleIRCClient):
                     else:
                         message += f" {oil_index['name']}: {price} {relative_change_format_start}{relative_change}{relative_change_format_end}"
                 else:
-                    logger.debug(f"Couldn't fetch oil data for {oil_index['name']}: {str(e)}")
+                    logger.debug(f"Couldn't fetch oil data for {oil_index['name']}")
             except Exception as e:
                 logger.debug(f"Exception querying oil index {oil_index['name']} from {url}")
             
@@ -986,7 +1005,7 @@ class IRCBot(irc.client.SimpleIRCClient):
                     else:
                         message += f" {currency['name']}: {price} {relative_change_format_start}{relative_change}{relative_change_format_end}"
                 else:
-                    logger.debug(f"Couldn't fetch currency pair for {currency['name']}: {str(e)}")
+                    logger.debug(f"Couldn't fetch currency pair for {currency['name']}")
             except Exception as e:
                 logger.debug(f"Exception querying currency pair {currency['name']} from {url}")
             
@@ -1051,11 +1070,6 @@ class IRCBot(irc.client.SimpleIRCClient):
 
     def get_mgmt(self, connection, sender, message, channel):
         """Handle .mgmt command."""
-
-        if self.GROQ_API_IS_RATE_LIMITED:
-            connection.privmsg(channel, "The API for this command is currently rate limited. Please try again later.")
-            return
-
         ticker = re.sub(r"^\.mgmt ", "", message)
         ticker = re.sub(r"^ ", "", ticker)
 
@@ -1165,27 +1179,22 @@ class IRCBot(irc.client.SimpleIRCClient):
 
         market_indices = [
             {
-                #'index': '^DJI',
                 'index': '.DJI',
                 'name': 'Dow Jones'
             },
             {
-                #'index': '^GSPC',
                 'index': '.SPX',
                 'name': 'S&P 500',
             },
             {
-                #'index': '^RUT',
                 'index': '.RUT',
                 'name': 'Russell 2000',
             },
             {
-                #'index': '^IXIC',
                 'index': '.IXIC',
                 'name': 'NASDAQ Composite'
             },
             {
-                #'index': '^VIX',
                 'index': '.VIX',
                 'name': 'VIX'
             }
@@ -1194,7 +1203,6 @@ class IRCBot(irc.client.SimpleIRCClient):
         message = ""
 
         for market_index in market_indices:
-            #url = f"https://finance.yahoo.com/quote/{market_index['index']}/"
             url = f"https://www.cnbc.com/quotes/{market_index['index']}"
 
             try:
@@ -1207,9 +1215,7 @@ class IRCBot(irc.client.SimpleIRCClient):
                 if response.status_code == 200:
                     html = response.text
                     soup = BeautifulSoup(html, "html.parser")
-                    #price = soup.select('[data-testid="qsp-price"]')
                     price = soup.select('.QuoteStrip-lastPrice')
-                    #relative_change = soup.select('[data-testid="qsp-price-change-percent"]')
                     relative_change = soup.select('.QuoteStrip-lastPriceStripContainer > span:last-child > span:last-child')
 
                     if len(price) < 1 or len(relative_change) < 1:
@@ -1448,6 +1454,7 @@ class IRCBot(irc.client.SimpleIRCClient):
             absolute_change_format_start = "\x033"
             absolute_change_format_end = "\x0F"
         elif absolute_change < 0:
+            absolute_change_symbol = '-'
             absolute_change_format_start = "\x034"
             absolute_change_format_end = "\x0F"
 
@@ -1457,7 +1464,6 @@ class IRCBot(irc.client.SimpleIRCClient):
 
         if relative_change is None:
             relative_change_percent_symbol = ""
-            relative_change_format_start = ""
             relative_change_format_start = ""
             relative_change_format_end = ""
         elif relative_change > 0:
@@ -1572,7 +1578,7 @@ class IRCBot(irc.client.SimpleIRCClient):
                 else:
                     connection.privmsg(channel, f"Unable to convert {first_currency_pair} to {second_currency_pair}")
             else:
-                connection.privmsg(channel, f"Error: {response.status_code} from fixer.io")
+                connection.privmsg(channel, f"Error: {response.status_code}")
         except Exception as e:
             logger.debug(f"Exception fetching exchange rates: {str(e)}")
 
