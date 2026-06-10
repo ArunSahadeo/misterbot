@@ -86,9 +86,13 @@ class IRCBot(irc.client.SimpleIRCClient):
         self.admins = config['admins']
         self.owner_email = config['owner_email']
         self.GROQ_API_KEY = config['keys']['GROQ']
+        self.GROQ_API_IS_RATE_LIMITED = False
         self._channel = None
         self._target_user = None
         self.nickserv_requests = {}
+        self.custom_error_commands = [
+            '.mgmt'
+        ]
         self.command_handlers = {
             '!time': self.handle_time,
             '!news': self.handle_news,
@@ -396,10 +400,16 @@ class IRCBot(irc.client.SimpleIRCClient):
                 try:
                     self.command_handlers[command](connection, sender, message, channel)
                 except Exception as e:
-                    logger.error(f"Error handling command {command} in {channel} from on_pubmsg: {e}")
-                    str_traceback = traceback.format_exc()
-                    logger.error(f"Traceback: {str_traceback}")
-                    connection.privmsg(channel, f"Error processing command {command}: {e}")
+                    if command not in self.custom_error_commands:
+                        logger.error(f"Error handling command {command} in {channel} from on_pubmsg: {e}")
+                        str_traceback = traceback.format_exc()
+                        logger.error(f"Traceback: {str_traceback}")
+                        connection.privmsg(channel, f"Error processing command {command}: {e}")
+
+                    if "Groq API Error" in str(e) and "429" in str(e):
+                        logger.debug("Groq API is now rate limited.")
+                        connection.privmsg(channel, "Groq API is now rate limited.")
+                        self.GROQ_API_IS_RATE_LIMITED = True
             else:
                 connection.privmsg(channel, f"{command} has not been implemented yet. To view a list of available commands, type .help.")
         elif len(urls) > 0:
@@ -1041,6 +1051,10 @@ class IRCBot(irc.client.SimpleIRCClient):
 
     def get_mgmt(self, connection, sender, message, channel):
         """Handle .mgmt command."""
+
+        if self.GROQ_API_IS_RATE_LIMITED:
+            connection.privmsg(channel, "The API for this command is currently rate limited. Please try again later.")
+            return
 
         ticker = re.sub(r"^\.mgmt ", "", message)
         ticker = re.sub(r"^ ", "", ticker)
