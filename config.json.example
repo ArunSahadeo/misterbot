@@ -4,6 +4,13 @@
 		"nickname": "misterbot",
 		"sasl_username": "misterbot",
 		"sasl_password": "ENTER_PASSWORD_HERE",
+		"admins": [
+				"admin_nick"
+		],
+		"owner_email": "example@gmail.com",
+		"keys": {
+			"GROQ": ""
+		},
 		"channels": [
 				"##accounting",
 				"##economics",

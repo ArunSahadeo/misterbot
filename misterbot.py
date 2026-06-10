@@ -26,6 +26,7 @@ import json
 import random
 import traceback
 from lxml import etree, html
+from helpers.SECCorporateRosterParser import SECCorporateRosterParser
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -82,6 +83,9 @@ class IRCBot(irc.client.SimpleIRCClient):
         self.sasl_username = config['sasl_username']
         self.sasl_password = config['sasl_password']
         self.channels = config['channels']
+        self.admins = config['admins']
+        self.owner_email = config['owner_email']
+        self.GROQ_API_KEY = config['keys']['GROQ']
         self._channel = None
         self._target_user = None
         self.nickserv_requests = {}
@@ -105,9 +109,75 @@ class IRCBot(irc.client.SimpleIRCClient):
             '.crypto': self.handle_crypto_prices,
             '.c': self.handle_crypto_prices,
             '.futures': self.handle_futures_prices,
+            '.mgmt': self.get_mgmt,
             '.help': self.display_help_prompt
         }
         # Flag to track SASL success
+
+        self.preload_sec_ticker_map()
+
+    def preload_sec_ticker_map(self):
+        global TICKER_TO_CIK_CACHE
+
+        headers = {
+            "User-Agent": f"IRCInvestmentBot/1.0 ({self.owner_email})"
+        }
+
+        map_url = "https://www.sec.gov/files/company_tickers.json"
+
+        try:
+            response = requests.get(map_url, headers=headers)
+
+            if response.status_code == 200:
+                ticker_map = response.json()
+
+                TICKER_TO_CIK_CACHE = {
+                    item["ticker"].upper(): str(item["cik_str"]).zfill(10)
+                    for item in ticker_map.values()
+                }
+
+                print(f"Successfully cached {len(TICKER_TO_CIK_CACHE)} SEC tickers.")
+        except Exception as e:
+            print(f"Failed to preload SEC map: {e}")
+
+    def get_cik_from_ticker(self, ticker):
+        return TICKER_TO_CIK_CACHE.get(ticker.upper().strip())
+
+    def fetch_sec_company_facts(self, ticker):
+        headers = {
+            "User-Agent": f"IRCInvestmentBot/1.0 ({self.owner_email})"
+        }
+
+        cik = self.get_cik_from_ticker(ticker)
+
+        if cik is None:
+            return f"Error: ticker '{ticker.upper()}' not found in SEC registry."
+
+        facts_url = f"https://data.sec.gov/api/xbrl/companyfacts/cik{cik}.json"
+        facts_response = requests.get(facts_url, headers=headers)
+
+        if facts_response.status_code == 200:
+            return facts_response.json()
+        else:
+            return f"SEC facts endpoint returned error code: {facts_response.status_code}"
+
+    def fetch_sec_company_submissions(self, ticker):
+        headers = {
+            "User-Agent": f"IRCInvestmentBot/1.0 ({self.owner_email})"
+        }
+
+        cik = self.get_cik_from_ticker(ticker)
+
+        if cik is None:
+            return f"Error: ticker '{ticker.upper()}' not found in SEC registry."
+
+        submissions_url = f"https://data.sec.gov/submissions/CIK{cik}.json"
+        submissions_response = requests.get(submissions_url, headers=headers)
+
+        if submissions_response.status_code == 200:
+            return submissions_response.json()
+        else:
+            return f"SEC submissions endpoint returned error code: {submissions_response.status_code}"
 
     def extract_http_method_uris(self, source_code: str, using_yf: bool):
         if using_yf:
@@ -968,6 +1038,24 @@ class IRCBot(irc.client.SimpleIRCClient):
             return [f"Couldn't fetch coin data for {ticker}: {str(e)}"]
 
         connection.privmsg(channel, message)
+
+    def get_mgmt(self, connection, sender, message, channel):
+        """Handle .mgmt command."""
+
+        ticker = re.sub(r"^\.mgmt ", "", message)
+        ticker = re.sub(r"^ ", "", ticker)
+
+        if re.match("^\$", ticker):
+            ticker = re.sub(r"^\$", "", ticker)
+
+        sec_corporate_roster_parser = SECCorporateRosterParser(ticker=ticker, user_agent_email=self.owner_email, GROQ_API_KEY=self.GROQ_API_KEY)
+        final_roster = sec_corporate_roster_parser.run_pipeline()
+        execs = [f"{name} ({title})" for name, title in final_roster["executives"].items()]
+        board = [f"{name} ({title})" for name, title in final_roster["board_members"].items()]
+        message = f"Executives: {', '.join(execs)}" if len(execs) > 0 else f"No executives found for {ticker.upper()}. Please consult one of the following users: {', '.join(self.admins)}"
+        message_2 = f"Board: {', '.join(board)}" if len(board) > 0 else f"No board directors found for {ticker.upper()}. Please consult one of the following users: {', '.join(self.admins)}"
+        connection.privmsg(channel, message)
+        connection.privmsg(channel, message_2)
 
     def display_help_prompt(self, connection, sender, message, channel):
         requested_command = re.sub(r"^\.help ", "", message)
