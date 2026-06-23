@@ -99,7 +99,6 @@ class IRCBot(irc.client.SimpleIRCClient):
         ]
         self.command_handlers = {
             '!time': self.handle_time,
-            '!news': self.handle_news,
             '!convert': self.handle_conversion,
             '!seen': self.handle_last_seen,
             '!quote': self.handle_stock_quote,
@@ -236,88 +235,6 @@ class IRCBot(irc.client.SimpleIRCClient):
             # Custom properties not available in this version.
             pass  # Skip custom properties extraction if the attribute is not available.
         return metadata  # Return the metadata dictionary.
-
-    def get_financial_news(self, keyword: str):
-        logger.debug(f"The ticker in get_financial_news: {keyword}")
-
-        try:
-            headers = {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/117.0.0.0 Safari/537.36'
-            }
-            url = f"https://finviz.com/quote.ashx?t={keyword}"
-            response = requests.get(url, headers=headers)
-            news_items = []
-
-            if response.status_code == 200:
-                html = response.text
-                soup = BeautifulSoup(html, "html.parser")
-                for index, news_item in zip(range(5), soup.select('#news-table > tr')):
-                    news_item_dict = {
-                        'link': news_item.find('a').get('href'),
-                        'title': news_item.find('a').text
-                    }
-
-                    news_items.append(news_item_dict)
-                    
-                return news_items
-            else:
-                return [f"Error: {response.status_code} from Finviz"]
-        except Exception as e:
-            return [f"Exception fetching news: {str(e)}"]
-
-    def summarise_article(self, news_item):
-        default_response = f"{news_item['title']} ({news_item['link']})"
-        logger.debug(f"The news_item: {default_response}")
-
-        if 'youtube.com' in news_item['link'] or 'barrons.com' in news_item['link']:
-            return default_response
-
-        link = news_item['link']
-
-        if link.startswith('/'):
-            link = 'https://finviz.com' + link
-
-        try:
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/117.0.0.0 Safari/537.36'
-            }
-            response = requests.get(link, headers=headers)
-            if response.status_code == 200:
-                html = response.text
-                soup = BeautifulSoup(html, "html.parser")
-
-                if "finance.yahoo.com" in link:
-                    text = soup.find("div", {"class": "atoms-wrapper"}).text
-                elif "finviz.com/news" in link:
-                    text = soup.find("div", {"class": "news-content"}).text
-                else:
-                    text = default_response
-            else:
-                return [f"Error: {response.status_code} from {link}"]
-        except Exception as e:
-            return [f"Exception summarising article: {str(e)}"]
-
-        if text == default_response or len(text) >= 4000:
-            return text
-
-        prompt = f"Summarise the following article in 256 characters or less:\n\n{text}"
-         
-        data = {
-            "model": "llama3.2",
-            "prompt": prompt,
-            "stream": False,
-            "max_length": 80
-        }
-
-        try:
-            response = requests.post(ollama_server_url, json=data)
-            if response.status_code == 200:
-                result = response.json()
-                return result.get("response", "").strip()
-            else:
-                return f"Error: Server responded with {response.status_code}."
-        except requests.exceptions.RequestException as e:
-            return f"Error: Unable to reach Ollama server. {e}"
 
     def on_all_raw_messages(self, connection, event):
         raw_message = event.arguments[0]
@@ -748,23 +665,6 @@ class IRCBot(irc.client.SimpleIRCClient):
         """Handle !time command."""
         current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         connection.privmsg(channel, f"Current time: {current_time}")
-
-    def handle_news(self, connection, sender, message, channel):
-        """Handle !news command."""
-        ticker = re.sub(r"^!news ", "", message)
-        ticker = re.sub(r"^\$", "", ticker)
-        logger.debug(f"The ticker: {ticker}")
-
-        if '!news' in ticker:
-            connection.privmsg(channel, "Please enter a ticker.")
-            return
-
-        news_items = self.get_financial_news(ticker)
-        
-        for news_item in news_items:
-            summary = self.summarise_article(news_item)
-            logger.debug(f"{summary}")
-            connection.privmsg(channel, f"{summary}")
 
     def handle_last_seen(self, connection, sender, message, channel):
         """Handle !seen command."""
