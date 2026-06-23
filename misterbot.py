@@ -1498,7 +1498,12 @@ class IRCBot(irc.client.SimpleIRCClient):
         stock = yf.Ticker(ticker)
 
         data = stock.info
-        summary = data.get("longBusinessSummary")
+
+        if len(data) < 2:
+            connection.privmsg(channel, f"Ticker does not exist.")
+            return
+
+        summary = data.get("longBusinessSummary", "")
 
         message = summary.strip()
         message_2 = ''
@@ -1541,6 +1546,9 @@ class IRCBot(irc.client.SimpleIRCClient):
                 message_4 = message_4[:450] + '-'
             else:
                 message_4 = message_4[:450]
+
+        if len(message) < 1:
+            message = f"No summary found for ticker {ticker.upper()}"
 
         connection.privmsg(channel, message)
 
