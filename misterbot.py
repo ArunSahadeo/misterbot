@@ -627,7 +627,7 @@ class IRCBot(irc.client.SimpleIRCClient):
 
         message = ""
 
-        if domain in ["reuters.com"]:
+        if domain in ["reuters.com", "sec.gov"]:
             try:
                 response = requests.get(url)
                 if response.status_code == 200:
