@@ -1164,7 +1164,7 @@ class IRCBot(irc.client.SimpleIRCClient):
         region = 'US'
 
         if sector_string == '.sector':
-            connection.privmsg(channel, 'Please enter a valid sector (e.g. consumer-cyclical, basic-materials) or a valid industry (e.g. specialty-chemicals, advertising-agencies). For a full list of permitted values, see https://ranaroussi.github.io/yfinance/reference/api/yfinance.Sector.html. If there is an ampersand in a value, e.g. Oil & Gas E&P, pass oil-gas-e-p instead. You can pass a second parameter, a ISO 3166-1 alpha-2 country code, to restrict results by country.')
+            connection.privmsg(channel, 'Please enter a valid sector (e.g. consumer-cyclical, basic-materials) or a valid industry (e.g. specialty-chemicals, advertising-agencies). For a full list of permitted values, see https://ranaroussi.github.io/yfinance/reference/api/yfinance.Sector.html. If there is an ampersand in a value, e.g. Oil & Gas E&P, pass oil-gas-e-p instead. You can pass a second parameter, an ISO 3166-1 alpha-2 country code, to restrict results by country.')
             return
 
         if ' ' in sector_string:
