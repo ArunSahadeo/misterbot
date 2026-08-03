@@ -103,6 +103,7 @@ class IRCBot(irc.client.SimpleIRCClient):
             '!seen': self.handle_last_seen,
             '!quote': self.handle_stock_quote,
             '.q': self.handle_stock_quote,
+            '.news': self.handle_stock_news,
             '.sector': self.handle_sector_company_listings,
             '.t': self.handle_stock_info,
             '.market': self.handle_market_prices,
@@ -330,6 +331,9 @@ class IRCBot(irc.client.SimpleIRCClient):
         urls = re.findall(pattern, message)
         sender = event.source.nick
         channel = event.target
+
+        if len(urls) == 1 and sender == self.nickname and message[-1] == ')':
+            urls = []
 
         if message.startswith('!'):
             command = message.split()[0]
@@ -1266,6 +1270,46 @@ class IRCBot(irc.client.SimpleIRCClient):
 
         if len('message_10') > 0:
             connection.privmsg(channel, message_10)
+
+    def handle_stock_news(self, connection, sender, message, channel):
+        """Handle .news command."""
+
+        ticker = re.sub(r"^\.news ", "", message)
+        ticker = re.sub(r"^ ", "", ticker)
+
+        if re.match("^\$", ticker):
+            ticker = re.sub(r"^\$", "", ticker)
+
+        news_items = []
+
+        try:
+            headers = {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/117.0.0.0 Safari/537.36'
+            }
+
+            url = f"https://finviz.com/quote.ashx?t={ticker}"
+            response = requests.get(url, headers=headers)
+
+            if response.status_code == 200:
+                html = response.text
+                soup = BeautifulSoup(html, "html.parser")
+                for index, news_item in zip(range(5), soup.select('#news-table > tr')):
+                    news_item_dict = {
+                        'link': news_item.find('a').get('href'),
+                        'title': news_item.find('a').text
+                    }
+
+                    news_items.append(news_item_dict)
+            else:
+                return [f"Error: {response.status_code} from Finviz"]
+        except Exception as e:
+            return [f"Exception fetching news: {str(e)}"]
+
+        if len(news_items) < 1:
+            return [f"No news items for {ticker}"]
+
+        for news_item in news_items:
+            connection.privmsg(channel, f"{news_item['link'].strip()} ({news_item['title'].strip()})")
 
     def handle_stock_quote(self, connection, sender, message, channel):
         """Handle !quote / .q command."""
