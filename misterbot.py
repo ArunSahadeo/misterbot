@@ -327,7 +327,7 @@ class IRCBot(irc.client.SimpleIRCClient):
     def on_pubmsg(self, connection, event):
         """Handle public channel messages."""
         message = event.arguments[0]
-        pattern = r"(?P<url>https?://[^\s]+)"
+        pattern = r"(?<!!)(?P<url>https?://[^\s]+)"
         urls = re.findall(pattern, message)
         sender = event.source.nick
         channel = event.target
