@@ -1315,14 +1315,14 @@ class IRCBot(irc.client.SimpleIRCClient):
         """Handle !quote / .q command."""
 
         ticker = re.sub(r"^!quote ", "", message)
-        ticker = re.sub(r"^\.q ", "", message)
-        ticker = re.sub(r"^ ", "", ticker)
+        ticker = re.sub(r"^\.q", "", ticker)
+        ticker = re.sub(" ", "", ticker)
 
         if re.match("^\$", ticker):
             ticker = re.sub(r"^\$", "", ticker)
 
         if ticker == "":
-            connection.prisvmg(channel, f"Please enter a valid ticker, e.g. $MSFT, MSFT, $msft, msft")
+            connection.privmsg(channel, f"Please enter a valid ticker, e.g. $MSFT, MSFT, $msft, msft")
             return
 
         stock = yf.Ticker(ticker)
@@ -1443,11 +1443,15 @@ class IRCBot(irc.client.SimpleIRCClient):
     def handle_stock_info(self, connection, sender, message, channel):
         """Handle .t command."""
 
-        ticker = re.sub(r"^\.t ", "", message)
-        ticker = re.sub(r"^ ", "", ticker)
+        ticker = re.sub(r"^\.t", "", message)
+        ticker = re.sub(" ", "", ticker)
 
         if re.match("^\$", ticker):
             ticker = re.sub(r"^\$", "", ticker)
+
+        if ticker == "":
+            connection.privmsg(channel, f"Please enter a valid ticker, e.g. $MSFT, MSFT, $msft, msft")
+            return
 
         stock = yf.Ticker(ticker)
 
