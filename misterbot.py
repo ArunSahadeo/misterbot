@@ -1321,6 +1321,10 @@ class IRCBot(irc.client.SimpleIRCClient):
         if re.match("^\$", ticker):
             ticker = re.sub(r"^\$", "", ticker)
 
+        if ticker == "":
+            connection.prisvmg(channel, f"Please enter a valid ticker, e.g. $MSFT, MSFT, $msft, msft")
+            return
+
         stock = yf.Ticker(ticker)
         data = stock.info
 
