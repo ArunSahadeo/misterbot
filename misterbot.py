@@ -1292,6 +1292,35 @@ class IRCBot(irc.client.SimpleIRCClient):
             url = f"https://finviz.com/quote.ashx?t={ticker}"
             response = requests.get(url, headers=headers)
 
+            if response.status_code == 404:
+                url = ""
+                stock = yf.Ticker(ticker)
+                data = stock.info
+
+                if len(data) < 2:
+                    connection.privmsg(channel, f"Securities / commodities ticker does not exist on either Finviz or Yahoo Finance.")
+                    return
+
+                news = stock.get_news(count=10, tab="all")
+
+                if len(news) < 1:
+                    connection.privmsg(channel, f"We could not find any news items for symbol {ticker} on Yahoo Finance.")
+                    return
+
+                for index, news_item in enumerate(news):
+                    if len(news_items) == 5:
+                        break
+
+                    news_url = news_item['content']['canonicalUrl']['url']
+                    news_title = news_item['content']['title']
+
+                    news_item_dict = {
+                        'link': news_url,
+                        'title': news_title
+                    }
+
+                    news_items.append(news_item_dict)
+
             if response.status_code == 200:
                 html = response.text
                 soup = BeautifulSoup(html, "html.parser")
@@ -1302,10 +1331,7 @@ class IRCBot(irc.client.SimpleIRCClient):
                     }
 
                     news_items.append(news_item_dict)
-            elif response.status_code == 404:
-                connection.privmsg(channel, f"We could not find any securities or commodities on Finviz with that symbol.")
-                return
-            else:
+            elif response.status_code != 200 and len(news_items) < 1:
                 return [f"Error: {response.status_code} from Finviz"]
         except Exception as e:
             return [f"Exception fetching news: {str(e)}"]
