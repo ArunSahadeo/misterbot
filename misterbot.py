@@ -1009,7 +1009,7 @@ class IRCBot(irc.client.SimpleIRCClient):
                 else:
                     message = 'No URIs are invoked.'
             else:
-                message = f'{requested_command} does not exist.'
+                message = f'{requested_command} does not exist. Make sure it is prefixed with a dot (.).'
         else:
             pattern = re.compile('^\.')
             ported_commands = [ command for command in list(self.command_handlers.keys()) if pattern.match(command) and command != '.help' ]
