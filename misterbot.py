@@ -1302,6 +1302,9 @@ class IRCBot(irc.client.SimpleIRCClient):
                     }
 
                     news_items.append(news_item_dict)
+            elif response.status_code == 404:
+                connection.privmsg(channel, f"We could not find any securities or commodities on Finviz with that symbol.")
+                return
             else:
                 return [f"Error: {response.status_code} from Finviz"]
         except Exception as e:
