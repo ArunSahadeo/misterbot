@@ -376,6 +376,7 @@ class IRCBot(irc.client.SimpleIRCClient):
                 connection.privmsg(channel, f"{command} has not been implemented yet. To view a list of available commands, type .help.")
         elif len(urls) > 0:
             for url in urls:
+                logger.debug(f"The URL to be queried: {url}")
                 self.output_link(url, connection, channel)
 
     def human_like_interaction(self, page):
