@@ -104,6 +104,7 @@ class IRCBot(irc.client.SimpleIRCClient):
             '!quote': self.handle_stock_quote,
             '.q': self.handle_stock_quote,
             '.news': self.handle_stock_news,
+            '.metals': self.handle_metals_prices,
             '.sector': self.handle_sector_company_listings,
             '.t': self.handle_stock_info,
             '.market': self.handle_market_prices,
@@ -1438,6 +1439,103 @@ class IRCBot(irc.client.SimpleIRCClient):
 
         if 'N/A' in industry and 'N/A' in sector:
             logger.debug(f"Supposedly unavailable ticker data: {str(data)}")
+
+        connection.privmsg(channel, message)
+
+    def handle_metals_prices(self, connection, sender, message, channel):
+        """Handle .metals command."""
+
+        message = ""
+
+        metals = [
+            {
+                'index': 'GC=F',
+                'name': 'Gold'
+            },
+            {
+                'index': 'SI=F',
+                'name': 'Silver',
+            },
+            {
+                'index': 'HG=F',
+                'name': 'Copper'
+            },
+            {
+                'index': 'PL=F',
+                'name': 'Platinum',
+            },
+            {
+                'index': 'PA=F',
+                'name': 'Palladium'
+            },
+            {
+                'index': 'ALI=F',
+                'name': 'Aluminium'
+            }
+        ]
+
+        for metal in metals:
+            ticker = metal['index']
+            metal = metal['name']
+            stock = yf.Ticker(ticker)
+            data = stock.info
+
+            if len(data) < 2:
+                logger.debug(f"Couldn't find data for metal {metal}")
+                continue
+
+            price = data.get("currentPrice")
+
+            if price is None:
+                price = data.get("regularMarketPrice")
+
+            if price is None:
+                logger.debug(f"Supposedly unavailable data for {metal}: {str(data)}")
+                continue
+
+            previous_price = data.get("regularMarketPreviousClose", 0.0)
+
+            if previous_price == 0:
+                relative_change = None
+            else:
+                relative_change = ((price / previous_price) - 1.0) * 100.0
+
+            absolute_change = price - previous_price
+
+            if absolute_change > 0:
+                absolute_change_symbol = '+'
+                absolute_change_format_start = "\x033"
+                absolute_change_format_end = "\x0F"
+            elif absolute_change < 0:
+                absolute_change_symbol = '-'
+                absolute_change_format_start = "\x034"
+                absolute_change_format_end = "\x0F"
+
+            relative_change_percent_symbol = ''
+            relative_change_format_start = ''
+            relative_change_format_end = ''
+
+            if relative_change is None:
+                relative_change_percent_symbol = ""
+                relative_change_format_start = ""
+                relative_change_format_end = ""
+            elif relative_change > 0:
+                relative_change_percent_symbol = '+'
+                relative_change_format_start = "\x033"
+                relative_change_format_end = "\x0F"
+            elif relative_change < 0:
+                relative_change_format_start = "\x034"
+                relative_change_format_end = "\x0F"
+
+            if relative_change is not None:
+                relative_change = str(format(relative_change, '.2f')) + '%'
+            else:
+                relative_change = 'N/A'
+
+            if len(message) > 0:
+                message += " | "
+
+            message += f"{metal} ({ticker}): {format(price, '.2f')} {absolute_change_format_start}{absolute_change_symbol}{format(absolute_change, '.2f')}{absolute_change_format_end} {relative_change_format_start}{relative_change_percent_symbol}{relative_change}{relative_change_format_end}"
 
         connection.privmsg(channel, message)
 
