@@ -482,40 +482,6 @@ class IRCBot(irc.client.SimpleIRCClient):
                     except TimeoutError:
                         logger.debug("Timeout waiting for Yahoo page to redirect.")
 
-                if "x.com" in url and "fixupx.com" not in url:
-                    logger.debug(f"The page title: {page_title}")
-
-                    try:
-                        page.wait_for_selector("[data-testid=\"UserName\"]", timeout=15000)
-                        logger.debug("✅ Found tweeter username")
-                        username_wrapper = page.query_selector('[data-testid="UserName"] > div > div > div > div')
-                        title = username_wrapper.inner_text() if username_wrapper else page_title
-                        message = f"[ {title} ]"
-                    except TimeoutError:
-                        logger.debug("Timeout waiting for tweeter username.")
-
-                if "fixupx.com" in url:
-                    try:
-                        page.wait_for_selector("article", timeout=15000)
-                        logger.debug("✅ Found main tweet")
-                        meta = page.query_selector('meta[property="og:title"]')
-                        title = meta.get_attribute("content") if meta else None
-                        meta2 = page.query_selector('meta[property="og:description"]')
-                        description = meta2.get_attribute("content") if meta2 else None
-                        if title:
-                            logger.debug("✅ Found tweet author")
-                            title = title.replace("\r", "").replace("\n", "")
-                            title = re.sub(r'\u200b', '', title)
-                            if description:
-                                logger.debug("✅ Found tweet content")
-                                description = description.replace("\r", "").replace("\n", "")
-                                message = f"[ {title}: {description} ]"
-                            else:
-                                description = "Check the tweet for any attached media."
-                                message = f"[ {title}: {description} ]"
-                    except TimeoutError:
-                        logger.debug("Timeout waiting for tweet content.")
-
                 if "bsky." in url:
                     try:
                         page.wait_for_selector("div[data-testid*=\"postThreadItem-by-\"]", timeout=15000)
@@ -630,8 +596,40 @@ class IRCBot(irc.client.SimpleIRCClient):
         if ("twitter.com" in url or re.search("http(?:[s])?://x.com", url) or re.search("^x.com", url) or "xcancel.com" in url) and ("/status/" in url):
             url = re.sub(r"(?:x|twitter|xcancel)\.com", "fixupx.com", url)
             url = re.sub(r"vxfixupx\.com", "fixupx.com", url)
+            url = re.sub("fixup", "", url)
 
         message = ""
+
+        if domain in ["x.com"]:
+            try:
+                headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+                response = requests.get(url, headers=headers, timeout=10)
+
+                if response.status_code == 200:
+                    soup = BeautifulSoup(response.text, "html.parser")
+                    og_title = soup.find("meta", property="og:title")
+                    og_desc = soup.find("meta", property="og:description")
+                    title = og_title["content"] if og_title else ""
+                    description = og_desc["content"] if og_desc else ""
+
+                    if title:
+                        logger.debug("✅ Found X post author")
+                        title = title.replace("\r", "").replace("\n", "")
+                        if description:
+                            logger.debug("✅ Found X post content")
+                            description = description.replace("\r", "").replace("\n", "")
+                            message = f"[ {title}: {description} ]"
+                            logger.debug(f"The byte count of the string: {len(message.encode('utf-8'))}")
+
+                            if len(message.encode('utf-8')) >= 495:
+                                message = message[:447] + '...'
+                                logger.debug(f"The byte count of the string: {len(message.encode('utf-8'))}")
+                        else:
+                            description = "Check the Bluesky post for any attached media."
+                            message = f"[ {title}: {description} ]"
+            except Exception as e:
+                logger.debug(f"Exception fetching Reuters link: {str(e)}")
+                return
 
         if domain in ["reuters.com", "sec.gov"]:
             try:
