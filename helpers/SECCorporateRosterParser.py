@@ -117,10 +117,21 @@ class SECCorporateRosterParser:
                     del target_dict[prev_person]
             target_dict[name] = new_role
 
-        # 1. Capture Departures / Transitions From
+        # NOTE ON [^.] GAPS BELOW: every pattern uses "[^.]*?" rather than ".*?"
+        # for the text between a captured name and the role/verb that follows it.
+        # This stops a lazy match from ever bleeding across a full stop into the
+        # next sentence (which is about a different person). Case-insensitivity
+        # is applied only to the connector words via inline "(?i:...)" groups,
+        # rather than to the whole pattern, so the Name/Role capture groups stay
+        # anchored to real Capitalised Words and don't also swallow ordinary
+        # lowercase text once IGNORECASE is in effect.
+
+        # 1. Capture Departures (e.g. "X will step down as CEO", or the "from"
+        #    half of "X will transition from role as CEO to ...")
         departure_pattern = re.compile(
-            r"\b([A-Z][a-z]+\s+[A-Z][a-z]+)\b.*?\b(?:transition\s+from|step\s+down\s+as|resigned\s+as|depart\s+from)\b.*?(?:role\s+as|as)\s+([A-Z][A-Za-z\s'']+?)(?=\s*(?:to|\.|,|\beffective\b))",
-            re.IGNORECASE,
+            r"\b([A-Z][a-z]+\s+[A-Z][a-z]+)\b[^.]*?"
+            r"(?i:transition\s+from|step\s+down\s+as|resigned\s+as|depart\s+from)\b[^.]*?"
+            r"(?i:role\s+as|as)\s+([A-Z][A-Za-z\s']+?)(?=\s*(?:(?i:to)|\.|,|(?i:effective)\b))"
         )
 
         for match in departure_pattern.finditer(raw_text):
@@ -128,14 +139,31 @@ class SECCorporateRosterParser:
             if is_valid_person_name(name) and name in executives:
                 del executives[name]
 
-        # 2. Capture Appointments / Transitions To
-        appointment_patterns = [
-            r"\b([A-Z][a-z]+\s+[A-Z][a-z]+)\b.*?\b(?:transition|become|appointed|serve)\b.*?\b(?:to|as)\s+([A-Z][A-Za-z\s'']+?)(?=\s*(?:of|\.|,|\beffective\b|\b’s\b))",
-            r"\bappointed\s+([A-Z][a-z]+\s+[A-Z][a-z]+)\b.*?\bas\s+([A-Z][A-Za-z\s'']+?)(?=\s*(?:of|\.|,|\band\b|\beffective\b))",
+        # 2. Capture Appointments / Transitions To. Each construction gets its
+        #    own explicit pattern instead of one pattern trying to cover every
+        #    verb with a loose "to|as" alternation - that loose version is what
+        #    caused "X will transition from his role as CEO to Executive Chair"
+        #    to be misread as X *becoming* CEO: the lazy match stopped at the
+        #    first "as" it found (the OLD role), never reaching the "to" that
+        #    introduces the new one.
+        role_patterns = [
+            # "X ... appointed ... as ROLE" (e.g. "the Board appointed John
+            # Ternus ... as Chief Executive Officer")
+            r"(?i:appointed)\s+([A-Z][a-z]+\s+[A-Z][a-z]+)\b[^.]*?(?i:as)\s+([A-Z][A-Za-z\s']+?)(?=\s*(?:(?i:of)|\.|,|(?i:and)\b|(?i:effective)\b))",
+            # "X will transition from ... to ROLE" - anchored on the literal
+            # "to" so it captures the destination role, not the one being left
+            r"\b([A-Z][a-z]+\s+[A-Z][a-z]+)\b[^.]*?(?i:transition(?:ed|ing)?\s+from)\b[^.]*?(?i:to)\s+([A-Z][A-Za-z\s']+?)(?=\s*(?:(?i:of)|\.|,|(?i:effective)\b))",
+            # "X will serve as ROLE"
+            r"\b([A-Z][a-z]+\s+[A-Z][a-z]+)\b[^.]*?(?i:serve)\s+(?i:as)\s+([A-Z][A-Za-z\s']+?)(?=\s*(?:(?i:of)|\.|,|(?i:effective)\b))",
+            # "X ... will become ROLE" - no "to"/"as" needed. This is the
+            # generic replacement for the old Art Levinson hardcoding: any
+            # director described this way (Lead Independent Director, Board
+            # Chair, etc.) is now picked up from the filing text itself.
+            r"\b([A-Z][a-z]+\s+[A-Z][a-z]+)\b[^.]*?(?i:become)\s+([A-Z][A-Za-z\s']+?)(?=\s*(?:(?i:of)|\.|,|(?i:on)\b|(?i:effective)\b))",
         ]
 
-        for pattern in appointment_patterns:
-            for match in re.finditer(pattern, raw_text, re.IGNORECASE):
+        for pattern in role_patterns:
+            for match in re.finditer(pattern, raw_text):
                 name = match.group(1).strip()
                 raw_title = match.group(2).strip()
 
@@ -148,7 +176,8 @@ class SECCorporateRosterParser:
                 mapped_title = self.normalize_title(raw_title) or raw_title
 
                 if board_keywords.search(raw_title):
-                    # Person moving to Board role (e.g. Tim Cook -> Executive Chair / Board Chair)
+                    # Person moving to Board role (e.g. Tim Cook -> Executive Chair / Board Chair,
+                    # or Art Levinson -> Lead Independent Director)
                     if name in executives and mapped_title in ["Board Chair", "Lead Independent Director", "Director"]:
                         del executives[name]
 
@@ -157,11 +186,7 @@ class SECCorporateRosterParser:
                     # Person appointed to C-Suite (e.g. John Ternus -> CEO)
                     assign_role_and_replace_predecessor(name, mapped_title, executives)
 
-        # 3. Explicit heuristic for Art Levinson transition to Lead Independent Director
-        if "Art Levinson" in raw_text and "Lead Independent Director" in raw_text:
-            assign_role_and_replace_predecessor("Art Levinson", "Lead Independent Director", directors)
-
-        # 4. Handle dual appointments (e.g., CEO joining Board as standard director)
+        # 3. Handle dual appointments (e.g., CEO joining Board as standard director)
         if "member of the board" in raw_text.lower():
             for name in list(executives.keys()):
                 if name in raw_text and name not in directors:
