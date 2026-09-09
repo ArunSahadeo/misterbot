@@ -85,11 +85,6 @@ class IRCBot(irc.client.SimpleIRCClient):
         self.channels = config['channels']
         self.admins = config['admins']
         self.owner_email = config['owner_email']
-        self.GROQ_API_KEY = config['keys']['GROQ']
-
-        # New robust tracking states for daily or per-minute rate limit locks
-        self.GROQ_LOCK_ACTIVE = False
-        self.GROQ_UNLOCK_TIMESTAMP = None
 
         self._channel = None
         self._target_user = None
@@ -301,30 +296,6 @@ class IRCBot(irc.client.SimpleIRCClient):
 
                         break
 
-    def calculate_groq_lockout(self, error_string):
-        """Parses Groq retry times and locks down the command thread natively."""
-        time_match = re.search(r"Please try again in\s+([0-9hms\.]+)", error_string, re.IGNORECASE)
-        total_seconds = 0
-
-        if time_match:
-            time_str = time_match.group(1)
-            hours = re.search(r'(\d+)h', time_str)
-            minutes = re.search(r'(\d+)m', time_str)
-            seconds = re.search(r'([\d\.]+)s', time_str)
-
-            if hours:
-                total_seconds += int(hours.group(1)) * 3600
-            if minutes:
-                total_seconds += int(minutes.group(1)) * 60
-            if seconds:
-                total_seconds += float(seconds.group(1))
-        else:
-            total_seconds = 300  # 5-minute safety threshold fallback
-
-        self.GROQ_UNLOCK_TIMESTAMP = datetime.now() + timedelta(seconds=total_seconds)
-        self.GROQ_LOCK_ACTIVE = True
-        logger.debug(f"Groq daily limit triggered. Lock active until: {self.GROQ_UNLOCK_TIMESTAMP.strftime('%H:%M:%S')}")
-
     def on_pubmsg(self, connection, event):
         """Handle public channel messages."""
         message = event.arguments[0]
@@ -347,19 +318,6 @@ class IRCBot(irc.client.SimpleIRCClient):
         elif re.match('^\.[a-z]{1,}', message):
             command = message.split()[0]
             if command in self.command_handlers:
-
-                # Check dynamic rate limit lock state prior to execution
-                if command == '.mgmt' and self.GROQ_LOCK_ACTIVE and self.GROQ_UNLOCK_TIMESTAMP:
-                    if datetime.now() < self.GROQ_UNLOCK_TIMESTAMP:
-                        remaining_delta = self.GROQ_UNLOCK_TIMESTAMP - datetime.now()
-                        mins, secs = divmod(int(remaining_delta.total_seconds()), 60)
-                        connection.privmsg(channel, f"Error: Groq API limit reached. Command .mgmt locked. Retry available in {mins:02d}:{secs:02d}.")
-                        return
-                    else:
-                        # Clear old lock cleanly if the cooldown timeline has lapsed
-                        self.GROQ_LOCK_ACTIVE = False
-                        self.GROQ_UNLOCK_TIMESTAMP = None
-
                 try:
                     self.command_handlers[command](connection, sender, message, channel)
                 except Exception as e:
@@ -368,11 +326,6 @@ class IRCBot(irc.client.SimpleIRCClient):
                         str_traceback = traceback.format_exc()
                         logger.error(f"Traceback: {str_traceback}")
                         connection.privmsg(channel, f"Error processing command {command}: {e}")
-
-                    # Intercept and process API structural limit exceptions thrown from our parser helper pipeline
-                    if "groq api error" in str(e).lower() and ("429" in str(e) or "rate_limit" in str(e).lower()):
-                        self.calculate_groq_lockout(str(e))
-                        connection.privmsg(channel, "Groq API daily token/request exhaustion triggered. The management command has been safely isolated.")
             else:
                 connection.privmsg(channel, f"{command} has not been implemented yet. To view a list of available commands, type .help.")
         elif len(urls) > 0:
@@ -980,12 +933,20 @@ class IRCBot(irc.client.SimpleIRCClient):
         if re.match("^\$", ticker):
             ticker = re.sub(r"^\$", "", ticker)
 
-        sec_corporate_roster_parser = SECCorporateRosterParser(ticker=ticker, user_agent_email=self.owner_email, GROQ_API_KEY=self.GROQ_API_KEY)
+        sec_corporate_roster_parser = SECCorporateRosterParser(ticker=ticker, user_agent_email=self.owner_email)
         final_roster = sec_corporate_roster_parser.run_pipeline()
-        execs = [f"{name} ({title})" for name, title in final_roster["executives"].items()]
-        board = [f"{name} ({title})" for name, title in final_roster["board_members"].items()]
-        message = f"Executives: {', '.join(execs)}" if len(execs) > 0 else f"No executives found for {ticker.upper()}. Please consult one of the following users: {', '.join(self.admins)}"
-        message_2 = f"Board: {', '.join(board)}" if len(board) > 0 else f"No board directors found for {ticker.upper()}. Please consult one of the following users: {', '.join(self.admins)}"
+        execs = []
+        directors = []
+
+        if len(final_roster["executives"]) > 0:
+            execs = [f"{name} ({title})" for name, title in final_roster["executives"].items()]
+
+        message = f"Executives: {', '.join(execs)}" if len(execs) > 0 else f"No executives found for {ticker.upper()}."
+
+        if len(final_roster["directors"]) > 0:
+            directors = [f"{name} ({title})" for name, title in final_roster["directors"].items()]
+
+        message_2 = f"Board: {', '.join(directors)}" if len(directors) > 0 else f"No board directors found for {ticker.upper()}."
         connection.privmsg(channel, message)
         connection.privmsg(channel, message_2)
 

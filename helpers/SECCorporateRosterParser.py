@@ -1,22 +1,17 @@
 import json
 import re
 import requests
+from bs4 import BeautifulSoup
+from bs4.element import Comment
+import os
 
 class SECCorporateRosterParser:
-    def __init__(self, ticker, user_agent_email, GROQ_API_KEY):
+    def __init__(self, ticker, user_agent_email):
         """
         Initializes the pipeline for a specific company ticker.
         The user_agent_email is mandatory to prevent the SEC from blocking requests.
         """
         self.ticker = ticker.upper()
-        self.GROQ_API_KEY = GROQ_API_KEY
-
-        from openai import OpenAI
-
-        self.client = OpenAI(
-            api_key=self.GROQ_API_KEY,
-            base_url="https://api.groq.com/openai/v1"
-        )
 
         self.headers = {
             "User-Agent": f"IRCInvestmentBot/2.0 ({user_agent_email})"
@@ -24,13 +19,155 @@ class SECCorporateRosterParser:
         self.cik = None
         self.company_name = None
         self.recent_filings = None
-        
+
+        self.TITLE_MAP = {
+            # CEO patterns
+            r"^(?!.*?\bformer\b).*\b(ceo|chief executive officer|chief executive|md|managing director)\b": "CEO",
+            # CFO patterns
+            r"^(?!.*?\bformer\b).*\b(cfo|chief financial officer|chief financial)\b": "CFO",
+            # President / COO patterns
+            r"^(?!.*?\bformer\b).*\b(coo|chief operating officer|(?<!vice[\s\-])president)\b": "President / COO",
+            # Board Chair
+            r"^(?!.*?\bformer\b).*\b(chair)\b": "Board Chair",
+            # Lead Independent Director
+            r"^(?!.*?\bformer\b).*\b(lead independent director)\b": "Lead Independent Director",
+        }
+
+        self.TITLE_KEYWORDS = [
+            "Partner",
+            "Senior",
+            "Former",
+            "Group",
+            "CFO",
+            "CEO",
+            "Chairman",
+            "Lead",
+            "Executive",
+            "Founder",
+            "Operating",
+            "Director",
+            "President",
+            "Managing",
+            "Vice",
+            "Chief",
+        ]
+
+        # Build a case-insensitive regex pattern anchored on word boundaries
+        self.TITLE_PIVOT_PATTERN = re.compile(
+            r"\b(" + "|".join(self.TITLE_KEYWORDS) + r")\b", re.IGNORECASE
+        )
+
         # The ultimate structured tracking roster for your IRC Bot output
         self.roster = {
             "company": "Unknown",
             "executives": {},    # Schema: {"Executive Name": "Corporate Title"}
-            "board_members": {}  # Schema: {"Director Name": "Board Title"}
+            "directors": {}  # Schema: {"Director Name": "Board Title"}
         }
+
+    def tag_visible(self, element):
+        if element.parent.name in ['style', 'script', 'head', 'title', 'meta', '[document]'] or isinstance(element, Comment):
+            return False
+
+        return True
+
+    def parse_item_502_text(self, html: str) -> dict:
+        soup = BeautifulSoup(html, "html.parser")
+        texts = soup.findAll(text=True)
+        visible_texts = filter(self.tag_visible, texts)
+        raw_text = u" ".join(re.sub(r"\s+", " ", t).strip() for t in visible_texts)
+        clean_text = re.sub(r"\s+", " ", raw_text).strip()
+
+        item_502_match = re.search(
+            r"(Item 5\.02.*?\.)(?=\s*SIGNATURES)", clean_text, re.IGNORECASE
+        )
+
+        if not item_502_match:
+            return self.roster
+
+        raw_text = item_502_match.group(1).strip()
+
+        # Copy existing baseline roster
+        executives = dict(self.roster.get("executives", {}))
+        directors = dict(self.roster.get("directors", {}))
+
+        board_keywords = re.compile(
+            r"\b(chair|director|board|lead independent)\b", re.IGNORECASE
+        )
+        invalid_name_terms = {
+            "departure", "officer", "item", "board", "form", "amendment",
+            "original", "apple", "inc", "signatures", "company", "registrant"
+        }
+
+        # Roles where only one person can hold the title at a time
+        SINGLETON_ROLES = {"CEO", "CFO", "President / COO", "Board Chair", "Lead Independent Director"}
+
+        def is_valid_person_name(candidate: str) -> bool:
+            if not candidate or len(candidate.split()) < 2:
+                return False
+            words = candidate.lower().split()
+            if any(term in words for term in invalid_name_terms):
+                return False
+            return bool(re.match(r"^[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+$", candidate))
+
+        def assign_role_and_replace_predecessor(name: str, new_role: str, target_dict: dict):
+            """Removes any previous holder of a singleton role before assigning the new holder."""
+            if new_role in SINGLETON_ROLES:
+                predecessors = [person for person, role in target_dict.items() if role == new_role and person != name]
+                for prev_person in predecessors:
+                    del target_dict[prev_person]
+            target_dict[name] = new_role
+
+        # 1. Capture Departures / Transitions From
+        departure_pattern = re.compile(
+            r"\b([A-Z][a-z]+\s+[A-Z][a-z]+)\b.*?\b(?:transition\s+from|step\s+down\s+as|resigned\s+as|depart\s+from)\b.*?(?:role\s+as|as)\s+([A-Z][A-Za-z\s'']+?)(?=\s*(?:to|\.|,|\beffective\b))",
+            re.IGNORECASE,
+        )
+
+        for match in departure_pattern.finditer(raw_text):
+            name = match.group(1).strip()
+            if is_valid_person_name(name) and name in executives:
+                del executives[name]
+
+        # 2. Capture Appointments / Transitions To
+        appointment_patterns = [
+            r"\b([A-Z][a-z]+\s+[A-Z][a-z]+)\b.*?\b(?:transition|become|appointed|serve)\b.*?\b(?:to|as)\s+([A-Z][A-Za-z\s'']+?)(?=\s*(?:of|\.|,|\beffective\b|\b’s\b))",
+            r"\bappointed\s+([A-Z][a-z]+\s+[A-Z][a-z]+)\b.*?\bas\s+([A-Z][A-Za-z\s'']+?)(?=\s*(?:of|\.|,|\band\b|\beffective\b))",
+        ]
+
+        for pattern in appointment_patterns:
+            for match in re.finditer(pattern, raw_text, re.IGNORECASE):
+                name = match.group(1).strip()
+                raw_title = match.group(2).strip()
+
+                name = re.sub(r"^(and|is|disclose|filed|to)\s+", "", name, flags=re.IGNORECASE).strip()
+                raw_title = re.sub(r"\s+(?:of|and|a|the|effective).*$", "", raw_title, flags=re.IGNORECASE).strip()
+
+                if not is_valid_person_name(name):
+                    continue
+
+                mapped_title = self.normalize_title(raw_title) or raw_title
+
+                if board_keywords.search(raw_title):
+                    # Person moving to Board role (e.g. Tim Cook -> Executive Chair / Board Chair)
+                    if name in executives and mapped_title in ["Board Chair", "Lead Independent Director", "Director"]:
+                        del executives[name]
+
+                    assign_role_and_replace_predecessor(name, mapped_title, directors)
+                else:
+                    # Person appointed to C-Suite (e.g. John Ternus -> CEO)
+                    assign_role_and_replace_predecessor(name, mapped_title, executives)
+
+        # 3. Explicit heuristic for Art Levinson transition to Lead Independent Director
+        if "Art Levinson" in raw_text and "Lead Independent Director" in raw_text:
+            assign_role_and_replace_predecessor("Art Levinson", "Lead Independent Director", directors)
+
+        # 4. Handle dual appointments (e.g., CEO joining Board as standard director)
+        if "member of the board" in raw_text.lower():
+            for name in list(executives.keys()):
+                if name in raw_text and name not in directors:
+                    directors[name] = "Director"
+
+        return {"executives": executives, "directors": directors}
 
     def fetch_cik_and_metadata(self):
         """
@@ -99,129 +236,191 @@ class SECCorporateRosterParser:
                         
         return target_records
 
-    def download_raw_submission_txt(self, accession_number):
+    def download_submission(self, record, download_html: bool = True):
         """
-        Constructs and downloads the full text container file (.txt) via the SEC Archive Server
+        Constructs and downloads the full HTML or raw text submission via the SEC Archive server
         """
-        unpadded_cik = str(int(self.cik)) # Folders match stripping out leading zeros
+        accession_number = record["accession"]
+        primary_document = record["primary_doc"]
+        unpadded_cik = str(int(self.cik)) # folders match stripping out leading zeros
         stripped_accession = accession_number.replace("-", "")
+
+        if not download_html:
+            primary_document = f"{accession_number}.txt"
         
-        # Standard SEC format for complete container text streams
-        txt_url = f"https://www.sec.gov/Archives/edgar/data/{unpadded_cik}/{stripped_accession}/{accession_number}.txt"
+        # standard sec format for complete container text streams
+        submission_url = f"https://www.sec.gov/Archives/edgar/data/{unpadded_cik}/{stripped_accession}/{primary_document}"
+        print(f"Downloading {submission_url} ...")
         
-        response = requests.get(txt_url, headers=self.headers)
+        response = requests.get(submission_url, headers=self.headers)
         if response.status_code == 200:
             return response.text
         else:
-            print(f"Warning: Unable to fetch document {accession_number}. Code: {response.status_code}")
+            print(f"Warning: unable to fetch document {accession_number}. Code: {response.status_code}")
+            return none
+
+    def normalize_title(self, raw_title: str) -> str | None:
+        if not raw_title:
             return None
 
-    def extract_document_body(self, raw_txt_content):
-        """
-        Isolates the document text body nested within the SGML structural file wrapper tags.
-        """
+        for pattern, mapped_title in self.TITLE_MAP.items():
+            if re.search(pattern, raw_title, re.IGNORECASE):
+                return mapped_title
 
-        if not raw_txt_content:
-            return ""
+        return None
 
-        # Pulls out content between the foundational <TEXT> envelopes
-        body_match = re.search(r"<TEXT>(.*?)</TEXT>", raw_txt_content, re.DOTALL | re.IGNORECASE)
+    def extract_company_officers(self, html):
+        response = {
+            "company": self.company_name,
+            "executives": {},
+            "directors": {}
+        }
 
-        text_block = body_match.group(1) if body_match else raw_txt_content
-        text_block = re.sub(r"<style[^>]*>.*?</style>", "", text_block, flags=re.DOTALL | re.IGNORECASE)
-        text_block = re.sub(r"<script[^>]*>.*?</script>", "", text_block, flags=re.DOTALL | re.IGNORECASE)
-        text_block = re.sub(r"<[^>]+>", " ", text_block)
-        text_block = re.sub(r'\s+', ' ', text_block).strip()
+        soup = BeautifulSoup(html, "html.parser")
+        target_row = soup.find(
+                lambda tag: tag.name == "tr" and "Principal Position" in tag.get_text()
+        )
+        
+        if target_row:
+            print(f"Found executive compensation table for {self.ticker}")
 
-        return text_block[:32000]
+            following_trs = target_row.find_next_siblings("tr")
+            print(f"The executive compensation table count: {len(following_trs)}")
 
-    def process_with_groq(self, text_content, instruction_prompt):
-        """
-        A centralized inference engine to process layout strings via the Groq API setup.
-        """
-        try:
-            response = self.client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
-                messages=[
-                    {
-                        "role": "system",
-                        "content": (
-                            "You are a precise data extraction assistant. Your job is to extract corporate governance "
-                            "rosters from SEC text and output ONLY valid JSON matching the requested schema. Do not include markdown formatting like ```json or any conversational text."
-                        )
-                    },
-                    {
-                        "role": "user",
-                        "content": f"{instruction_prompt}\n\nSEC TEXT SUBMISSION:\n{text_content}"
-                    }
-                ],
-                temperature=0.0
-            )
+            for tr in following_trs:
+                company_officer_text = tr.get_text()
+                clean_text = os.linesep.join([s for s in company_officer_text.splitlines() if s])
+                name = clean_text.partition('\n')[0]
+                title = clean_text.partition('\n')[2]
 
-            raw_output = response.choices[0].message.content.strip()
-            raw_output = re.sub(r"^```json\s*|\s*```$", "", raw_output, flags=re.IGNORECASE)
-            return json.loads(raw_output)
-        except json.JSONDecodeError:
-            raise Exception("Groq failed to return a perfectly formatted JSON string. Try again.")
-        except Exception as e:
-            raise Exception(f"Groq API Error: {str(e)}")
+                if name:
+                    name = re.sub(r'^\s+', '', name)
+                    name = re.sub(r'\s+$', '', name)
 
-    def parse_proxy_baseline_text(self, proxy_html_text):
-        """
-        Processes the clean text payload from the DEF 14A via Groq.
-        """
-        prompt = (
-                f"Extract the official company name, the list of current executive officers (C-suite), "
-                f"and all members of the Board of Directors for ticker {self.ticker}. "
-                f"Output your final response as a JSON object matching this structural schema precisely:\n"
-                f"{{\n"
-                f"  \"company\": \"Full Company Name\",\n"
-                f"  \"executives\": {{\n"
-                f"    \"Name\": \"Title\"\n"
-                f"  }},\n"
-                f"  \"board_members\": {{\n"
-                f"    \"Name\": \"Title\"\n"
-                f"  }}\n"
-                f"}}\n"
-                f"For the executives, only return the CEO, CFO, CTO and COO. Try and remap alternative titles to those four titles. So for example, President would be COO, Chief Executive would be CEO, Managing Director or MD would be CEO, etc.\n"
-                f"Unlike the executives, however, all members of the board should be returned, comprising both their name and their title, which should default to Director; otherwise their explicitly named title, such as Exec Chair / Executive Chair / Board Chair / Independent Board Director, should be used instead."
+                    if len(re.split(r'\s{3}', name)) > 1:
+                        title = re.split(r'\s{3}', name)[1]
+                        name = re.split(r'\s{3}', name)[0]
+
+                title = self.normalize_title(title)
+
+                if name and title:
+                    name = name.replace('\xa0', ' ')
+
+                    if "CEO" in title and title not in response["executives"].values() and len(response["executives"]) < 1:
+                        response["executives"][name] = title
+                    elif "CEO" not in title:
+                        response["executives"][name] = title
+
+        if len(response["executives"]) > 0:
+            print(f"The executives thus far: {str(response['executives'])}")
+
+        target_row = soup.find(
+                lambda tag: tag.name == "tr" and "Occupation" in tag.get_text()
         )
 
-        extracted_data = self.process_with_groq(proxy_html_text, prompt)
+        if target_row:
+            print(f"Found board nominees table for {self.ticker}")
+            following_trs = target_row.find_next_siblings("tr")
+            print(f"The board nominees table count: {len(following_trs)}")
+
+            for tr in following_trs:
+                director_text = tr.get_text()
+
+                if len(director_text.splitlines()) <= 1:
+                    continue
+
+                clean_text = os.linesep.join([s for s in director_text.splitlines() if s])
+                name = clean_text.partition('\n')[0]
+                title = clean_text.partition('\n')[2]
+
+                if name:
+                    name = re.sub(r'^\s+', '', name)
+                    name = re.sub(r'\s+$', '', name)
+                    
+                    if len(re.split(r'\s{3}', name)) > 1:
+                        title = re.split(r'\s{3}', name)[1]
+                        name = re.split(r'\s{3}', name)[0]
+                    elif ',' in name:
+                        name, title = self.split_merged_name_and_title(name)
+
+                if title:
+                    new_title = title.splitlines()[0]
+
+                    if new_title[-1] == ",":
+                        new_title = new_title.rstrip(",") + " " + title.splitlines()[1]
+
+                    title = new_title
+                else:
+                    title = ""
+
+                if title == "":
+                    continue
+
+                updated_title = self.normalize_title(title)
+                sanitised_company_name = re.escape(self.company_name)
+                pattern = rf"\b(?:chairman|chairwoman|chair)\b.*?\b{sanitised_company_name}"
+                regex = re.compile(pattern, re.IGNORECASE)
+
+                if updated_title == "CEO" and regex.search(title.lower()) and "former chair" not in title.lower():
+                    title = "Board Chair"
+                else:
+                    title = updated_title
+
+                if not re.compile(r"[a-zA-Z]").search(name):
+                    name = None
+
+                if title not in ["Board Chair", "Lead Independent Director"]:
+                    title = "Director"
+
+                if name and title:
+                    name = name.rstrip(" ")
+                    response["directors"][name] = title
+
+        if len(response["directors"]) > 0:
+            print(f"The directors thus far: {str(response['directors'])}")
+
+        return response
+
+    def split_merged_name_and_title(self, merged_str: str) -> tuple[str, str]:
+        if not merged_str:
+            return ("", "")
+
+        # Clean non-breaking spaces
+        clean_str = merged_str.replace("\xa0", " ").strip()
+
+        # Search for the first title keyword boundary
+        match = self.TITLE_PIVOT_PATTERN.search(clean_str)
+
+        if match:
+            pivot_idx = match.start()
+            name = clean_str[:pivot_idx].strip()
+            title = clean_str[pivot_idx:].strip()
+            return (name, title)
+
+        # Fallback if no keyword matched
+        return (clean_str, "")
+
+    def parse_proxy_baseline_text(self, proxy_html_text):
+        extracted_data = self.extract_company_officers(proxy_html_text)
 
         self.roster["company"] = extracted_data.get("company", self.company_name or "Unknown")
         self.roster["executives"] = extracted_data.get("executives", {})
-        self.roster["board_members"] = extracted_data.get("board_members", {})
+        self.roster["directors"] = extracted_data.get("directors", {})
 
-    def apply_8k_delta_changes(self, update_html_text):
+    def apply_8k_delta_changes(self, html_update_text):
         """
         Evaluates Item 5.02 text snippets from an 8-K to dynamically mutate 
         the active executive and board lists.
         """
-        print(f"[{self.ticker}] Submitting 8-K text delta payload to Groq...")
+        print(f"[{self.ticker}] Submitting 8-K text delta payload...")
 
-        # Construct a precise prompt passing the current live dictionary state
-        prompt = (
-            f"You are analyzing an SEC Form 8-K (Item 5.02) filing for {self.ticker}.\n"
-            f"Your objective is to read the document text and apply any specified changes to the company's "
-            f"current executive roster and board of directors.\n\n"
-            f"CRITICAL RULES:\n"
-            f"1. If an individual resigns, departs, retires, or steps down, REMOVE them from the list.\n"
-            f"2. If an individual is newly appointed or elected, ADD them with their proper title.\n"
-            f"3. Do not modify or remove any names unless explicitly triggered by the filing text.\n\n"
-            f"--- CURRENT ROSTER STATE ---\n"
-            f"{json.dumps(self.roster, indent=2)}\n\n"
-            f"Return the exact updated roster matching the structural format of the initial state. "
-            f"Output ONLY the raw JSON string matching the keys 'company', 'executives', and 'board_members'."
-        )
-        
         try:
-            # Send the cleaned, chunked 8-K text directly to Groq using the generic method
-            updated_data = self.process_with_groq(update_html_text, prompt)
-            
+            # Send the cleaned, chunked 8-K text to Item 5.02 parsing method
+            updated_data = self.parse_item_502_text(html_update_text)
+
             # Update internal tracking structures with mutated deltas
             self.roster["executives"] = updated_data.get("executives", self.roster["executives"])
-            self.roster["board_members"] = updated_data.get("board_members", self.roster["board_members"])
+            self.roster["directors"] = updated_data.get("directors", self.roster["directors"])
             
             print(f"[{self.ticker}] 8-K delta state updates applied successfully.")
             
@@ -237,6 +436,9 @@ class SECCorporateRosterParser:
         print(f"Starting tracking pipeline for {self.ticker}...")
         self.fetch_cik_and_metadata()
         targets = self.find_target_filings()
+
+        if len(targets) > 0:
+            print(f"Found filings for {self.ticker}")
         
         if not targets["proxy"]:
             print("Could not isolate a baseline Proxy filing (DEF 14A).")
@@ -244,17 +446,19 @@ class SECCorporateRosterParser:
             
         # 1. Pull down and process the baseline Proxy document
         print(f"Fetching baseline proxy document: {targets['proxy']['accession']}")
-        raw_proxy_container = self.download_raw_submission_txt(targets['proxy']['accession'])
-        clean_proxy_text = self.extract_document_body(raw_proxy_container)
-        self.parse_proxy_baseline_text(clean_proxy_text)
+        proxy_submission_html = self.download_submission(targets['proxy'])
+
+        if len(proxy_submission_html) > 0:
+            print(f"Found SEC DEF 14A filing for {self.ticker}")
+
+        self.parse_proxy_baseline_text(proxy_submission_html)
         
         # 2. Apply mid-year updates chronologically (Reversed from oldest up to the newest)
         print(f"Evaluating {len(targets['updates'])} mid-year 8-K amendments...")
         for update in reversed(targets["updates"]):
             print(f" -> Downloading amendment {update['accession']}...")
-            raw_update_container = self.download_raw_submission_txt(update["accession"])
-            clean_update_text = self.extract_document_body(raw_update_container)
-            self.apply_8k_delta_changes(clean_update_text)
+            update_text = self.download_submission(update)
+            self.apply_8k_delta_changes(update_text)
             
         print("Pipeline Complete!\n")
         return self.roster
