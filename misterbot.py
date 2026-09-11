@@ -89,9 +89,7 @@ class IRCBot(irc.client.SimpleIRCClient):
         self._channel = None
         self._target_user = None
         self.nickserv_requests = {}
-        self.custom_error_commands = [
-            '.mgmt'
-        ]
+        self.custom_error_commands = []
         self.command_handlers = {
             '!time': self.handle_time,
             '!convert': self.handle_conversion,
