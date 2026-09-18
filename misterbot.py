@@ -1287,6 +1287,9 @@ class IRCBot(irc.client.SimpleIRCClient):
                         'title': news_item.find('a').text
                     }
 
+                    if news_item_dict['link'].startswith('/'):
+                        news_item_dict['link'] = 'https://finviz.com' + news_item_dict['link']
+
                     news_items.append(news_item_dict)
             elif response.status_code != 200 and len(news_items) < 1:
                 return [f"Error: {response.status_code} from Finviz"]
