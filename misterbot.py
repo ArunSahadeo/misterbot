@@ -917,9 +917,12 @@ class IRCBot(irc.client.SimpleIRCClient):
 
                 message = f"{ticker.upper()}: {name} | {price} | {absolute_change_format_start}{absolute_change_symbol}{one_hour_percent_change}{absolute_change_format_end} (1hr absolute change)"
             else:
-                return [f"Status code {response.status_code} returned"]
+                logger.debug(f"Status code {response.status_code} returned")
         except Exception as e:
-            return [f"Couldn't fetch coin data for {ticker}: {str(e)}"]
+            logger.debug(f"Couldn't fetch coin data for {ticker}: {str(e)}")
+
+        if len(message) < 1:
+            message = f"Unable to find cryptocurrency with ticker {ticker}."
 
         connection.privmsg(channel, message)
 
