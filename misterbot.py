@@ -874,7 +874,7 @@ class IRCBot(irc.client.SimpleIRCClient):
         if re.match("^\$", ticker):
             ticker = re.sub(r"^\$", "", ticker)
 
-        if ticker == '.c' or ticker == '.crypto':
+        if ticker == '.c' or ticker == '.crypto' or len(ticker.strip()) < 1:
             connection.privmsg(channel, 'Please enter a cryptocurrency ticker.')
             return
 
