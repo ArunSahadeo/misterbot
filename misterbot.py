@@ -96,6 +96,7 @@ class IRCBot(irc.client.SimpleIRCClient):
             '!seen': self.handle_last_seen,
             '!quote': self.handle_stock_quote,
             '.q': self.handle_stock_quote,
+            '.w': self.fetch_wikipedia_description,
             '.news': self.handle_stock_news,
             '.metals': self.handle_metals_prices,
             '.sector': self.handle_sector_company_listings,
@@ -1304,6 +1305,38 @@ class IRCBot(irc.client.SimpleIRCClient):
 
         for news_item in news_items:
             connection.privmsg(channel, f"{news_item['link'].strip()} ({news_item['title'].strip()})")
+
+    def fetch_wikipedia_description(self, connection, sender, message, channel):
+        """Handle .w command."""
+
+        slug = re.sub(r"^\.w", "", message)
+        slug = re.sub(" ", "", slug)
+
+        if slug == "":
+            connection.privmsg(channel, f"Please enter a valid Wikipedia URL slug.")
+            return
+
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36'
+        }
+
+        url = f"https://en.wikipedia.org/wiki/{slug}"
+        response = requests.get(url, headers=headers)
+
+        if response.status_code == 200:
+            try:
+                tree = html.fromstring(response.text)
+                desc = tree.xpath(f"//*[@id=\"mw-content-text\"]//p[@id][not(self::node()[@class=\"mw-empty-elt\"])]")[0]
+                desc_element = etree.tostring(desc)
+                desc_element = desc_element.decode('ascii')
+                desc_element = re.sub('<[^<]+?>', '', desc_element)
+                message = desc_element.strip()
+            except Exception as e:
+                message = "Could not fetch Wikipedia description."
+        else:
+            message = "Could not fetch Wikipedia description."
+
+        connection.privmsg(channel, message)
 
     def handle_stock_quote(self, connection, sender, message, channel):
         """Handle !quote / .q command."""
