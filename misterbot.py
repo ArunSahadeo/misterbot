@@ -595,6 +595,27 @@ class IRCBot(irc.client.SimpleIRCClient):
                 logger.debug(f"Exception fetching Reuters link: {str(e)}")
                 return
 
+        if 'linkedin.com/posts/' in url:
+            try:
+                response = requests.get(url)
+
+                if response.status_code == 200:
+                    html = response.text
+                    soup = BeautifulSoup(html, "html.parser")
+                    message = soup.select_one("article .attributed-text-segment-list__container p").text
+
+                    import unicodedata
+
+                    message = unicodedata.normalize("NFKC", message)
+                    message = re.sub(r"\s+", " ", message)
+                    message = message.strip()
+
+                    if len(message.encode('utf-8')) >= 495:
+                        message = message[:447] + '...'
+            except Exception as e:
+                logger.debug(f"Exception fetching Reuters link: {str(e)}")
+                return
+
         if len(message) > 0:
             connection.privmsg(channel, f"{message}")
             return
