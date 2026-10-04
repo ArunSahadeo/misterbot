@@ -98,6 +98,7 @@ class IRCBot(irc.client.SimpleIRCClient):
             '.q': self.handle_stock_quote,
             '.w': self.fetch_wikipedia_description,
             '.news': self.handle_stock_news,
+            '.reports': self.fetch_latest_reports,
             '.metals': self.handle_metals_prices,
             '.sector': self.handle_sector_company_listings,
             '.t': self.handle_stock_info,
@@ -1358,6 +1359,67 @@ class IRCBot(irc.client.SimpleIRCClient):
             message = "Could not fetch Wikipedia description."
 
         connection.privmsg(channel, message)
+
+    def fetch_latest_reports(self, connection, sender, message, channel):
+        """Handle .reports command."""
+
+        reports = [
+            {
+                'name': 'Jobs Report',
+                'url': 'https://www.bls.gov/feed/empsit.rss'
+            },
+            {
+                'name': 'CPI',
+                'url': 'https://www.bls.gov/feed/bls_latest.rss'
+            }
+        ]
+
+        for report in reports:
+            name = report['name']
+            url = report['url']
+            message = f"{name}: Unable to find the latest data. Please try again later."
+
+            if name in ['Jobs Report']:
+                headers = {
+                    "User-Agent": f"IRCInvestmentBot/1.0 ({self.owner_email})",
+                    "Accept": "application/rss+xml, application/xml, text/xml, */*"
+                }
+
+                response = requests.get(url, headers=headers, timeout=10)
+
+                if response.status_code == 200:
+                    rss_feed = response.text
+
+                    try:
+                        soup = BeautifulSoup(rss_feed, features="xml")
+                        entry = soup.find("entry")
+                        title = entry.find("title")
+                        message = f"{name}: {title.text}"
+                    except Exception:
+                        message = f"{name}: Unable to extract data. Please try again later."
+            elif name in ['CPI']:
+                headers = {
+                    "User-Agent": f"IRCInvestmentBot/1.0 ({self.owner_email})",
+                    "Accept": "application/rss+xml, application/xml, text/xml, */*"
+                }
+
+                response = requests.get(url, headers=headers, timeout=10)
+
+                if response.status_code == 200:
+                    rss_feed = response.text
+
+                    try:
+                        soup = BeautifulSoup(rss_feed, features="xml")
+                        first_item_desc = soup.select_one("channel item description")
+                        html_content = first_item_desc.get_text()
+                        inner_soup = BeautifulSoup(html_content, "html.parser")
+                        target_tag = inner_soup.select_one("p strong")
+                        extracted_text = target_tag.get_text(strip=True)
+                        message = f"{name}: {extracted_text}"
+                    except Exception:
+                        message = f"{name}: Unable to extract data. Please try again later."
+
+            connection.privmsg(channel, message)
 
     def handle_stock_quote(self, connection, sender, message, channel):
         """Handle !quote / .q command."""
