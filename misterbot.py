@@ -1371,6 +1371,10 @@ class IRCBot(irc.client.SimpleIRCClient):
             {
                 'name': 'CPI',
                 'url': 'https://www.bls.gov/feed/bls_latest.rss'
+            },
+            {
+                'name': 'PPI',
+                'url': 'https://www.bls.gov/feed/ppi.rss'
             }
         ]
 
@@ -1379,7 +1383,7 @@ class IRCBot(irc.client.SimpleIRCClient):
             url = report['url']
             message = f"{name}: Unable to find the latest data. Please try again later."
 
-            if name in ['Jobs Report']:
+            if name in ['Jobs Report', 'PPI']:
                 headers = {
                     "User-Agent": f"IRCInvestmentBot/1.0 ({self.owner_email})",
                     "Accept": "application/rss+xml, application/xml, text/xml, */*"
