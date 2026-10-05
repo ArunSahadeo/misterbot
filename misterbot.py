@@ -88,6 +88,7 @@ class IRCBot(irc.client.SimpleIRCClient):
 
         self._channel = None
         self._target_user = None
+        self.current_command = None
         self.nickserv_requests = {}
         self.custom_error_commands = []
         self.command_handlers = {
@@ -319,6 +320,7 @@ class IRCBot(irc.client.SimpleIRCClient):
             command = message.split()[0]
             if command in self.command_handlers:
                 try:
+                    self.current_command = command
                     self.command_handlers[command](connection, sender, message, channel)
                 except Exception as e:
                     if command not in self.custom_error_commands:
@@ -355,7 +357,7 @@ class IRCBot(irc.client.SimpleIRCClient):
     def run_playwright(self, url, queue):
         """Run Playwright in a separate process to fetch page metadata."""
 
-        if "https://oui.doleta.gov/unemploy/claims.asp" in url:
+        if self.current_command == ".reports":
             user_agent = f"IRCInvestmentBot/1.0 ({self.owner_email})"
         else:
             user_agent = (
@@ -540,7 +542,7 @@ class IRCBot(irc.client.SimpleIRCClient):
                     except TimeoutError:
                         logger.debug("Timeout waiting for Instagram content.")
 
-                if "https://oui.doleta.gov/unemploy/claims.asp" in url:
+                if "https://oui.doleta.gov/unemploy/claims.asp" in url and self.current_command == ".reports":
                     try:
                         page.wait_for_selector('select[name="strtdate"]', timeout=15000)
                         logger.debug("✅ Found start date dropdown")
@@ -1434,6 +1436,10 @@ class IRCBot(irc.client.SimpleIRCClient):
                 'url': 'https://www.bls.gov/feed/ppi.rss'
             },
             {
+                'name': 'PMI',
+                'url': 'https://tradingeconomics.com/united-states/manufacturing-pmi'
+            },
+            {
                 'name': 'Unemployment Claims',
                 'url': 'https://oui.doleta.gov/unemploy/claims.asp'
             }
@@ -1497,6 +1503,24 @@ class IRCBot(irc.client.SimpleIRCClient):
                     message = queue.get()
                     message = message.replace("\n", "")
                     message = f"{name}: {message}"
+            elif name in ['PMI']:
+                headers = {
+                    "User-Agent": f"IRCInvestmentBot/1.0 ({self.owner_email})",
+                    "Accept": "application/html, */*"
+                }
+
+                response = requests.get(url, headers=headers, timeout=10)
+
+                if response.status_code == 200:
+                    html = response.text
+
+                    try:
+                        soup = BeautifulSoup(html, "html.parser")
+                        summary = soup.select_one("h2#description").text
+                        summary = summary.split(". ")[0]
+                        message = f"{name}: {summary}"
+                    except Exception:
+                        message = f"{name}: Unable to extract data. Please try again later."
 
             connection.privmsg(channel, message)
 
