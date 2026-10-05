@@ -1436,8 +1436,12 @@ class IRCBot(irc.client.SimpleIRCClient):
                 'url': 'https://www.bls.gov/feed/ppi.rss'
             },
             {
-                'name': 'PMI',
+                'name': 'PMI (Manufacturing)',
                 'url': 'https://tradingeconomics.com/united-states/manufacturing-pmi'
+            },
+            {
+                'name': 'PMI (Services)',
+                'url': 'https://tradingeconomics.com/united-states/non-manufacturing-pmi'
             },
             {
                 'name': 'Unemployment Claims',
@@ -1503,7 +1507,7 @@ class IRCBot(irc.client.SimpleIRCClient):
                     message = queue.get()
                     message = message.replace("\n", "")
                     message = f"{name}: {message}"
-            elif name in ['PMI']:
+            elif 'PMI' in name:
                 headers = {
                     "User-Agent": f"IRCInvestmentBot/1.0 ({self.owner_email})",
                     "Accept": "application/html, */*"
