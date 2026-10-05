@@ -341,17 +341,34 @@ class IRCBot(irc.client.SimpleIRCClient):
         page.evaluate("window.scrollBy(0, window.innerHeight / 2)")
         time.sleep(random.uniform(1, 2))
 
+    def handle_response(self, response):
+        req = getattr(response, "request", None)
+        method = req.method if req else getattr(response, "method", "UNKNOWN")
+
+        if ".gov" in response.url and method == "POST":
+            logger.debug(f"[{response.status}] {response.url}")
+
+            with open('./response.txt', 'w') as response_file:
+                print(("Response Body:\n", response.text()), file=response_file)
+                response_file.close()
+
     def run_playwright(self, url, queue):
         """Run Playwright in a separate process to fetch page metadata."""
+
+        if "https://oui.doleta.gov/unemploy/claims.asp" in url:
+            user_agent = f"IRCInvestmentBot/1.0 ({self.owner_email})"
+        else:
+            user_agent = (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/140.0.0.0 Safari/537.36"
+            )
+
         try:
             with sync_playwright() as p:
                 browser = p.chromium.launch(headless=True)
                 context = browser.new_context(
-                    user_agent=(
-                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                        "AppleWebKit/537.36 (KHTML, like Gecko) "
-                        "Chrome/140.0.0.0 Safari/537.36"
-                    ),
+                    user_agent=user_agent,
                     locale="en-GB",
                     viewport={"width": 1280, "height": math.floor(random.random() * 100)},
                     java_script_enabled=True,
@@ -363,6 +380,8 @@ class IRCBot(irc.client.SimpleIRCClient):
                 stealth_manager.apply_stealth_sync(page)
                 tempdir = tempfile.gettempdir()
                 is_document = False
+
+                page.on("response", self.handle_response)
 
                 try:
                     response = page.goto(url, wait_until="networkidle", timeout=10000)
@@ -520,6 +539,44 @@ class IRCBot(irc.client.SimpleIRCClient):
                         message = f"[ {author}: {description} ]"
                     except TimeoutError:
                         logger.debug("Timeout waiting for Instagram content.")
+
+                if "https://oui.doleta.gov/unemploy/claims.asp" in url:
+                    try:
+                        page.wait_for_selector('select[name="strtdate"]', timeout=15000)
+                        logger.debug("✅ Found start date dropdown")
+                        start_date = page.query_selector('select[name="strtdate"]')
+                        end_date = page.query_selector('select[name="enddate"]')
+                        current_year = datetime.now().strftime("%Y")
+                        logger.debug(f"✅ The current year: {current_year}")
+                        start_date.select_option(current_year)
+                        end_date.select_option(current_year)
+
+                        with page.expect_navigation():
+                            logger.debug("✅ Preparing to submit form to fetch results")
+                            page.click('input[type="submit"][value="Submit"]')
+
+                        logger.debug(f"✅ Successfully navigated to {page.url}")
+                        page.wait_for_selector('table[summary*="Report Table"]', timeout=15000)
+                        logger.debug("✅ Found report table.")
+                        report_table = page.query_selector('table[summary*="Report Table"]')
+                        latest_claims_record = report_table.query_selector_all('tr:has(> td[headers*="nsa_initial_claims"]:not([headers*="noinfo"]))')[-1]
+                        logger.debug("✅ Found latest UI claims record.")
+                        initial_nsa_claims = latest_claims_record.query_selector('td[headers*="nsa_initial_claims"]').inner_text()
+                        initial_sa_claims = latest_claims_record.query_selector('td[headers*=" sa_initial_claims"]').inner_text()
+                        continued_nsa_claims = latest_claims_record.query_selector('td[headers*="nsa_continued_claims"]').inner_text()
+                        continued_sa_claims = latest_claims_record.query_selector('td[headers*=" sa_continued_claims"]').inner_text()
+
+                        claims = {
+                            'Initial Claims (NSA)': initial_nsa_claims,
+                            'Initial Claims (SA)': initial_sa_claims,
+                            'Continued Claims (NSA)': continued_nsa_claims,
+                            'Continued Claims (SA)': continued_sa_claims
+                        }
+
+                        message = "; ".join(f"{k}: {v}" for k, v in claims.items())
+                    except TimeoutError:
+                        logger.debug("Timeout waiting for UI report.")
+                        message = "Unable to fetch data due to error."
 
                 if len(message) < 1:
                     message = f"[ {page_title} ]"
@@ -1375,6 +1432,10 @@ class IRCBot(irc.client.SimpleIRCClient):
             {
                 'name': 'PPI',
                 'url': 'https://www.bls.gov/feed/ppi.rss'
+            },
+            {
+                'name': 'Unemployment Claims',
+                'url': 'https://oui.doleta.gov/unemploy/claims.asp'
             }
         ]
 
@@ -1422,6 +1483,20 @@ class IRCBot(irc.client.SimpleIRCClient):
                         message = f"{name}: {extracted_text}"
                     except Exception:
                         message = f"{name}: Unable to extract data. Please try again later."
+            elif name in ['Unemployment Claims']:
+                queue = Queue()
+                process = Process(target=self.run_playwright, args=(url, queue))
+                process.start()
+                process.join(60)  # Wait up to 15 seconds for the process to complete
+
+                if process.is_alive():
+                    process.terminate()
+                    logger.debug(f"Timeout processing URL {url}")
+                    message = f"{name}: Timeout processing {url}"
+                else:
+                    message = queue.get()
+                    message = message.replace("\n", "")
+                    message = f"{name}: {message}"
 
             connection.privmsg(channel, message)
 
