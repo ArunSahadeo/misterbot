@@ -1444,6 +1444,10 @@ class IRCBot(irc.client.SimpleIRCClient):
                 'url': 'https://tradingeconomics.com/united-states/non-manufacturing-pmi'
             },
             {
+                'name': 'PCE',
+                'url': 'https://tradingeconomics.com/united-states/pce-price-index-annual-change'
+            },
+            {
                 'name': 'Unemployment Claims',
                 'url': 'https://oui.doleta.gov/unemploy/claims.asp'
             }
@@ -1507,7 +1511,7 @@ class IRCBot(irc.client.SimpleIRCClient):
                     message = queue.get()
                     message = message.replace("\n", "")
                     message = f"{name}: {message}"
-            elif 'PMI' in name:
+            elif 'PMI' in name or name in ['PCE']:
                 headers = {
                     "User-Agent": f"IRCInvestmentBot/1.0 ({self.owner_email})",
                     "Accept": "application/html, */*"
@@ -1521,7 +1525,12 @@ class IRCBot(irc.client.SimpleIRCClient):
                     try:
                         soup = BeautifulSoup(html, "html.parser")
                         summary = soup.select_one("h2#description").text
-                        summary = summary.split(". ")[0]
+
+                        if "PCE" not in name:
+                            summary = summary.split(". ")[0]
+                        elif "PCE" in name:
+                            summary = re.sub(" source: .+$", "", summary)
+
                         message = f"{name}: {summary}"
                     except Exception:
                         message = f"{name}: Unable to extract data. Please try again later."
