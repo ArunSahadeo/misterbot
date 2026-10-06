@@ -100,6 +100,7 @@ class IRCBot(irc.client.SimpleIRCClient):
             '.w': self.fetch_wikipedia_description,
             '.news': self.handle_stock_news,
             '.reports': self.fetch_latest_reports,
+            '.calendar': self.fetch_earnings_calendar,
             '.metals': self.handle_metals_prices,
             '.sector': self.handle_sector_company_listings,
             '.t': self.handle_stock_info,
@@ -343,17 +344,6 @@ class IRCBot(irc.client.SimpleIRCClient):
         page.evaluate("window.scrollBy(0, window.innerHeight / 2)")
         time.sleep(random.uniform(1, 2))
 
-    def handle_response(self, response):
-        req = getattr(response, "request", None)
-        method = req.method if req else getattr(response, "method", "UNKNOWN")
-
-        if ".gov" in response.url and method == "POST":
-            logger.debug(f"[{response.status}] {response.url}")
-
-            with open('./response.txt', 'w') as response_file:
-                print(("Response Body:\n", response.text()), file=response_file)
-                response_file.close()
-
     def run_playwright(self, url, queue):
         """Run Playwright in a separate process to fetch page metadata."""
 
@@ -382,8 +372,6 @@ class IRCBot(irc.client.SimpleIRCClient):
                 stealth_manager.apply_stealth_sync(page)
                 tempdir = tempfile.gettempdir()
                 is_document = False
-
-                page.on("response", self.handle_response)
 
                 try:
                     response = page.goto(url, wait_until="networkidle", timeout=10000)
@@ -683,10 +671,10 @@ class IRCBot(irc.client.SimpleIRCClient):
         queue = Queue()
         process = Process(target=self.run_playwright, args=(url, queue))
         process.start()
-        process.join(60)  # Wait up to 15 seconds for the process to complete
+        process.join(60)  # Wait up to 60 seconds for the process to complete
         if process.is_alive():
             process.terminate()
-            logger.debug(f"Timeout processing URL {url}")
+            logger.debug(f"Timeout processing URL {url} from command {self.current_command}")
             connection.privmsg(channel, f"Timeout processing {url}")
             return
         message = queue.get()
@@ -1419,6 +1407,38 @@ class IRCBot(irc.client.SimpleIRCClient):
 
         connection.privmsg(channel, message)
 
+    def fetch_earnings_calendar(self, connection, sender, message, channel):
+        """Handle .calendar command."""
+
+        schedules = [
+            "thisweek",
+            "nextweek"
+        ]
+
+        now = datetime.now()
+
+        for schedule in schedules:
+            week_start = now - timedelta(days=now.weekday())
+
+            if schedule == "nextweek":
+                week_start = week_start + timedelta(days=7)
+
+            week_end = week_start + timedelta(days=5)
+            calendars = yf.Calendars()
+            earnings_calendar = calendars.get_earnings_calendar(start=week_start, end=week_end)
+            earnings_calendar_dict = earnings_calendar.to_dict("records")
+
+            calendar_events = ", ".join(
+                f"{calendar_item['Company']} ({calendar_item['Event Start Date'].strftime('%d/%m/%Y %H:%M')})"
+                for calendar_item in earnings_calendar_dict
+)
+
+            if calendar_events is not None:
+                schedule = re.sub("week", " week", schedule)
+                message = f"Earnings {schedule}: {calendar_events}"
+
+            connection.privmsg(channel, message)
+
     def fetch_latest_reports(self, connection, sender, message, channel):
         """Handle .reports command."""
 
@@ -1501,11 +1521,11 @@ class IRCBot(irc.client.SimpleIRCClient):
                 queue = Queue()
                 process = Process(target=self.run_playwright, args=(url, queue))
                 process.start()
-                process.join(60)  # Wait up to 15 seconds for the process to complete
+                process.join(60)  # Wait up to 60 seconds for the process to complete
 
                 if process.is_alive():
                     process.terminate()
-                    logger.debug(f"Timeout processing URL {url}")
+                    logger.debug(f"Timeout processing URL {url} from command {self.current_command}")
                     message = f"{name}: Timeout processing {url}"
                 else:
                     message = queue.get()
