@@ -1425,7 +1425,7 @@ class IRCBot(irc.client.SimpleIRCClient):
 
             week_end = week_start + timedelta(days=5)
             calendars = yf.Calendars()
-            earnings_calendar = calendars.get_earnings_calendar(start=week_start, end=week_end)
+            earnings_calendar = calendars.get_earnings_calendar(start=week_start, end=week_end, limit=100)
             earnings_calendar_dict = earnings_calendar.to_dict("records")
 
             calendar_events = ", ".join(
