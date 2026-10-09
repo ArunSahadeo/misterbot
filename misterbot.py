@@ -1492,8 +1492,9 @@ class IRCBot(irc.client.SimpleIRCClient):
             connection.privmsg(channel, f"Please enter a valid Wikipedia URL slug.")
             return
 
+        # Wikipedia requires a custom User-Agent identifying your application/contact
         headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36'
+            'User-Agent': f'IRCInvestmentBot/1.0 ({self.owner_email})'
         }
 
         url = f"https://en.wikipedia.org/wiki/{slug}"
