@@ -417,6 +417,10 @@ class IRCBot(irc.client.SimpleIRCClient):
                         message = f"[ Title: {title} ] [ Author: {author} ] [ Created: {created} ] [ Last Modified: {last_modified} ] [ Last Modified By: {last_modified_by} ]"
 
                 page_title = page.title()
+
+                if len(page_title) < 1:
+                    page_title = "Title Not Found"
+
                 default_title = ""
                 actual_url = page.url
                 logger.debug(f"The URL: {actual_url}")
