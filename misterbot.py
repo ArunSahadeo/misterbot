@@ -103,6 +103,7 @@ class IRCBot(irc.client.SimpleIRCClient):
             '.calendar': self.fetch_earnings_calendar,
             '.metals': self.handle_metals_prices,
             '.sector': self.handle_sector_company_listings,
+            '.trends': self.handle_sector_news,
             '.t': self.handle_stock_info,
             '.market': self.handle_market_prices,
             '.markets': self.handle_market_prices,
@@ -1182,6 +1183,108 @@ class IRCBot(irc.client.SimpleIRCClient):
                 logger.debug(f"Exception querying market index {market_index['name']} from {url}")
             
         connection.privmsg(channel, message)
+
+    def handle_sector_news(self, connection, sender, message, channel):
+        """Handle .trends command."""
+
+        valid_sectors = [
+            'basic-materials',
+            'communication-services',
+            'consumer-cyclical',
+            'consumer-defensive',
+            'energy',
+            'financial-services',
+            'healthcare',
+            'industrials',
+            'real-estate',
+            'technology',
+            'utilities'
+        ]
+
+        sector_string = re.sub(r"^.trends ", "", message)
+        region = 'US'
+
+        if sector_string == '.sector':
+            connection.privmsg(channel, 'Please enter a valid sector (e.g. consumer-cyclical, basic-materials) or a valid industry (e.g. specialty-chemicals, advertising-agencies). For a full list of permitted values, see https://ranaroussi.github.io/yfinance/reference/api/yfinance.Sector.html. If there is an ampersand in a value, e.g. Oil & Gas E&P, pass oil-gas-e-p instead. You can pass a second parameter, an ISO 3166-1 alpha-2 country code, to restrict results by country.')
+            return
+
+        if ' ' in sector_string:
+            sector_string = sector_string.split()
+            region = sector_string[1]
+            sector_string = sector_string[0]
+
+        if sector_string in valid_sectors:
+            sector = yf.Sector(sector_string, region=region)
+        else:
+            sector = yf.Industry(sector_string, region=region)
+
+        sector_companies = sector.top_companies
+        news_items = []
+
+        for symbol, row in sector_companies.iterrows():
+            if len(news_items) > 4:
+                break
+
+            name = row.get("name") or row.get("shortName") or "N/A"
+            name = " ".join(str(name).split())
+
+            try:
+                headers = {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/117.0.0.0 Safari/537.36'
+                }
+
+                url = f"https://finviz.com/quote.ashx?t={symbol}"
+                response = requests.get(url, headers=headers)
+
+                if response.status_code == 404:
+                    url = ""
+                    stock = yf.Ticker(symbol)
+                    data = stock.info
+
+                    if len(data) < 2:
+                        continue
+
+                    news = stock.get_news(count=1, tab="all")
+
+                    if len(news) < 1:
+                        logger.debug(f"We could not find any news items for symbol {symbol} on Yahoo Finance for {self.current_command}.")
+                        continue
+
+                    for index, news_item in enumerate(news):
+                        news_url = news_item['content']['canonicalUrl']['url']
+                        news_title = news_item['content']['title']
+
+                        news_item_dict = {
+                            'link': news_url,
+                            'title': news_title
+                        }
+
+                        news_items.append(news_item_dict)
+
+                if response.status_code == 200:
+                    html = response.text
+                    soup = BeautifulSoup(html, "html.parser")
+                    for index, news_item in zip(range(1), soup.select('#news-table > tr')):
+                        news_item_dict = {
+                            'link': news_item.find('a').get('href'),
+                            'title': news_item.find('a').text
+                        }
+
+                        if news_item_dict['link'].startswith('/'):
+                            news_item_dict['link'] = 'https://finviz.com' + news_item_dict['link']
+
+                        news_items.append(news_item_dict)
+                elif response.status_code != 200 and len(news_items) < 1:
+                    continue
+            except Exception as e:
+                continue
+
+        if len(news_items) < 1:
+            connection.privmsg(channel, f"Unable to find news items for sector / industry: {sector_string}")
+            return
+
+        for news_item in news_items:
+            connection.privmsg(channel, f"{news_item['link'].strip()} ({news_item['title'].strip()})")
 
     def handle_sector_company_listings(self, connection, sender, message, channel):
         """Handle .sector command."""
