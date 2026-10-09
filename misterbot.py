@@ -1412,36 +1412,63 @@ class IRCBot(irc.client.SimpleIRCClient):
         connection.privmsg(channel, message)
 
     def fetch_earnings_calendar(self, connection, sender, message, channel):
-        """Handle .calendar command."""
-
-        schedules = [
-            "thisweek",
-            "nextweek"
+        """Handle .calendar command by scraping Yahoo Finance earnings calendar."""
+        now = datetime.now()
+        dates_to_check = [
+            ("this week", now),
+            #("next week", now + timedelta(days=7))
         ]
 
-        now = datetime.now()
+        headers = {
+            'User-Agent': generate_user_agent(),
+            'Accept-Language': 'en-US,en;q=0.9',
+        }
 
-        for schedule in schedules:
-            week_start = now - timedelta(days=now.weekday())
+        for label, reference_date in dates_to_check:
+            # Calculate Monday of the targeted week
+            monday = reference_date - timedelta(days=reference_date.weekday())
+            date_str = monday.strftime("%Y-%m-%d")
 
-            if schedule == "nextweek":
-                week_start = week_start + timedelta(days=7)
+            url = f"https://finance.yahoo.com/calendar/earnings?day={date_str}"
+            calendar_items = []
 
-            week_end = week_start + timedelta(days=5)
-            calendars = yf.Calendars()
-            earnings_calendar = calendars.get_earnings_calendar(start=week_start, end=week_end, limit=100)
-            earnings_calendar_dict = earnings_calendar.to_dict("records")
+            try:
+                response = requests.get(url, headers=headers, timeout=10)
+                if response.status_code == 200:
+                    soup = BeautifulSoup(response.text, "html.parser")
+                    current_year = datetime.now().year
+                    # Locate earnings table rows
+                    rows = soup.select("table tbody tr")
 
-            calendar_events = ", ".join(
-                f"{calendar_item['Company']} ({calendar_item['Event Start Date'].strftime('%d/%m/%Y %H:%M')})"
-                for calendar_item in earnings_calendar_dict
-)
+                    for row in rows[:15]:  # Limit rows per week to avoid spamming channel
+                        cols = [col.text.strip() for col in row.find_all("td")]
+                        if len(cols) >= 3:
+                            symbol = cols[0]
+                            company = cols[1]
+                            call_schedule = cols[3] if len(cols) > 2 else "N/A"
+                            event_date_str = soup.select_one("[data-testid=\"cal-info\"] > p").get_text()
+                            event_date_str = event_date_str.replace("Earnings On ", "")
+                            full_event_date_str = f"{event_date_str} {current_year}"
+                            event_date = datetime.strptime(full_event_date_str, "%a, %b %d %Y")
+                            event_date = event_date.strftime("%d/%m/%Y")
+ 
+                            # Standardize output entry
+                            calendar_items.append(f"{symbol} ({company} - {event_date} ({call_schedule}))")
 
-            if calendar_events is not None:
-                schedule = re.sub("week", " week", schedule)
-                message = f"Earnings {schedule}: {calendar_events}"
+                if calendar_items:
+                    formatted_events = ", ".join(calendar_items)
+                    # Enforce byte limit safety for IRC messages
+                    if len(formatted_events.encode('utf-8')) > 400:
+                        formatted_events = formatted_events[:397] + "..."
+                    message_text = f"Earnings {label} (starting {date_str}): {formatted_events}"
+                else:
+                    message_text = f"Earnings {label} (starting {date_str}): No major earnings releases found."
 
-            connection.privmsg(channel, message)
+            except Exception as e:
+                logger.error(f"Error scraping earnings calendar for {date_str}: {e}")
+                message_text = f"Earnings {label}: Error fetching data."
+
+            connection.privmsg(channel, message_text)
 
     def fetch_latest_reports(self, connection, sender, message, channel):
         """Handle .reports command."""
