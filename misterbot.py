@@ -1510,7 +1510,7 @@ class IRCBot(irc.client.SimpleIRCClient):
             except Exception as e:
                 message = "Could not fetch Wikipedia description."
         else:
-            message = "Could not fetch Wikipedia description."
+            message = f"Could not fetch Wikipedia description due to {response.status_code} error."
 
         connection.privmsg(channel, message)
 
