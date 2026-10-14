@@ -1580,6 +1580,7 @@ class IRCBot(irc.client.SimpleIRCClient):
         report_name = re.sub(r"^\.reports ", "", message)
         report_name = re.sub("^ ", "", report_name)
         report_name = re.sub(r"^\.reports", "", report_name)
+        output_help_message = True
 
         reports = [
             {
@@ -1622,6 +1623,7 @@ class IRCBot(irc.client.SimpleIRCClient):
                 return
 
             reports = filtered_reports
+            output_help_message = False
 
         for report in reports:
             name = report['name']
@@ -1707,7 +1709,13 @@ class IRCBot(irc.client.SimpleIRCClient):
 
             connection.privmsg(channel, message)
 
-        connection.privmsg(channel, "All reports processed.")
+        if output_help_message:
+            message_suffix = "You can pass any of the report names to this command in the future to return only those specific reports."
+        else:
+            message_suffix = "Pass the command by itself in future to return all reports."
+
+        message = f"All reports processed. {message_suffix}"
+        connection.privmsg(channel, message)
 
     def handle_stock_quote(self, connection, sender, message, channel):
         """Handle !quote / .q command."""
