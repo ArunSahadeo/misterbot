@@ -1617,7 +1617,7 @@ class IRCBot(irc.client.SimpleIRCClient):
             report_names = [report['name'] for report in reports]
 
             if len(filtered_reports) < 1:
-                message = f"Unable to locate that report. Available reports: {'; '.join(report_names)}"
+                message = f"Unable to locate that report. Available reports: {'; '.join(report_names)}. If you don't enter a report, all will be returned."
                 connection.privmsg(channel, message)
                 return
 
