@@ -1577,6 +1577,10 @@ class IRCBot(irc.client.SimpleIRCClient):
     def fetch_latest_reports(self, connection, sender, message, channel):
         """Handle .reports command."""
 
+        report_name = re.sub(r"^\.reports ", "", message)
+        report_name = re.sub("^ ", "", report_name)
+        report_name = re.sub(r"^\.reports", "", report_name)
+
         reports = [
             {
                 'name': 'Jobs Report',
@@ -1607,6 +1611,17 @@ class IRCBot(irc.client.SimpleIRCClient):
                 'url': 'https://oui.doleta.gov/unemploy/claims.asp'
             }
         ]
+
+        if report_name != "":
+            filtered_reports = [report for report in reports if report['name'] == report_name]
+            report_names = [report['name'] for report in reports]
+
+            if len(filtered_reports) < 1:
+                message = f"Unable to locate that report. Available reports: {'; '.join(report_names)}"
+                connection.privmsg(channel, message)
+                return
+
+            reports = filtered_reports
 
         for report in reports:
             name = report['name']
@@ -1691,6 +1706,8 @@ class IRCBot(irc.client.SimpleIRCClient):
                         message = f"{name}: Unable to extract data. Please try again later."
 
             connection.privmsg(channel, message)
+
+        connection.privmsg(channel, "All reports processed.")
 
     def handle_stock_quote(self, connection, sender, message, channel):
         """Handle !quote / .q command."""
