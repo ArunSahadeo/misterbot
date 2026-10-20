@@ -581,10 +581,10 @@ class IRCBot(irc.client.SimpleIRCClient):
                 except:
                     pass
 
-                html = page.content()
+                content = page.content()
 
                 with open('./html.txt', 'w') as html_file:
-                    print(html, file=html_file)
+                    print(content, file=html_file)
                     html_file.close()
 
                 browser.close()
@@ -640,8 +640,8 @@ class IRCBot(irc.client.SimpleIRCClient):
             try:
                 response = requests.get(url)
                 if response.status_code == 200:
-                    html = response.text
-                    soup = BeautifulSoup(html, "html.parser")
+                    content = response.text
+                    soup = BeautifulSoup(content, "html.parser")
                     title = soup.find("title").text
                     message = f"[ {title} ]"
             except Exception as e:
@@ -653,8 +653,8 @@ class IRCBot(irc.client.SimpleIRCClient):
                 response = requests.get(url)
 
                 if response.status_code == 200:
-                    html = response.text
-                    soup = BeautifulSoup(html, "html.parser")
+                    content = response.text
+                    soup = BeautifulSoup(content, "html.parser")
                     message = soup.select_one("article .attributed-text-segment-list__container p").text
 
                     import unicodedata
@@ -744,8 +744,8 @@ class IRCBot(irc.client.SimpleIRCClient):
                 response = requests.get(url, headers=headers)
 
                 if response.status_code == 200:
-                    html = response.text
-                    soup = BeautifulSoup(html, "html.parser")
+                    content = response.text
+                    soup = BeautifulSoup(content, "html.parser")
                     price = soup.select('h3.Summary-title + ul > li.Summary-stat:nth-child(5) > span.Summary-value')
                     bond_yield = soup.select('.QuoteStrip-lastPrice')
                     price_at_previous_close = soup.select('h3.Summary-title + ul > li.Summary-stat:nth-child(8) > span.Summary-value')
@@ -826,8 +826,8 @@ class IRCBot(irc.client.SimpleIRCClient):
                 response = requests.get(url, headers=headers)
 
                 if response.status_code == 200:
-                    html = response.text
-                    soup = BeautifulSoup(html, "html.parser")
+                    content = response.text
+                    soup = BeautifulSoup(content, "html.parser")
                     price = soup.select('.mod-tearsheet-overview__quote__bar > li:first-child .mod-ui-data-list__value')
                     relative_change = soup.select('.mod-tearsheet-overview__quote__bar > li:nth-child(2) .mod-ui-data-list__value')
 
@@ -909,8 +909,8 @@ class IRCBot(irc.client.SimpleIRCClient):
                 response = requests.get(url, headers=headers)
 
                 if response.status_code == 200:
-                    html = response.text
-                    soup = BeautifulSoup(html, "html.parser")
+                    content = response.text
+                    soup = BeautifulSoup(content, "html.parser")
                     price = soup.select('.QuoteStrip-lastPrice')
                     relative_change = soup.select('.QuoteStrip-lastPriceStripContainer > *:last-child > *:last-child')
 
@@ -1154,8 +1154,8 @@ class IRCBot(irc.client.SimpleIRCClient):
                 response = requests.get(url, headers=headers)
 
                 if response.status_code == 200:
-                    html = response.text
-                    soup = BeautifulSoup(html, "html.parser")
+                    content = response.text
+                    soup = BeautifulSoup(content, "html.parser")
                     price = soup.select('.QuoteStrip-lastPrice')
                     relative_change = soup.select('.QuoteStrip-lastPriceStripContainer > span:last-child > span:last-child')
 
@@ -1262,8 +1262,8 @@ class IRCBot(irc.client.SimpleIRCClient):
                         news_items.append(news_item_dict)
 
                 if response.status_code == 200:
-                    html = response.text
-                    soup = BeautifulSoup(html, "html.parser")
+                    content = response.text
+                    soup = BeautifulSoup(content, "html.parser")
                     for index, news_item in zip(range(1), soup.select('#news-table > tr')):
                         news_item_dict = {
                             'link': news_item.find('a').get('href'),
@@ -1459,8 +1459,8 @@ class IRCBot(irc.client.SimpleIRCClient):
                     news_items.append(news_item_dict)
 
             if response.status_code == 200:
-                html = response.text
-                soup = BeautifulSoup(html, "html.parser")
+                content = response.text
+                soup = BeautifulSoup(content, "html.parser")
                 for index, news_item in zip(range(5), soup.select('#news-table > tr')):
                     news_item_dict = {
                         'link': news_item.find('a').get('href'),
@@ -1610,6 +1610,10 @@ class IRCBot(irc.client.SimpleIRCClient):
             {
                 'name': 'Unemployment Claims',
                 'url': 'https://oui.doleta.gov/unemploy/claims.asp'
+            },
+            {
+                'name': 'Housing',
+                'url': 'https://www.census.gov/construction/nrc/current/index.html'
             }
         ]
 
@@ -1692,10 +1696,10 @@ class IRCBot(irc.client.SimpleIRCClient):
                 response = requests.get(url, headers=headers, timeout=10)
 
                 if response.status_code == 200:
-                    html = response.text
+                    content = response.text
 
                     try:
-                        soup = BeautifulSoup(html, "html.parser")
+                        soup = BeautifulSoup(content, "html.parser")
                         summary = soup.select_one("h2#description").text
 
                         if "PCE" not in name:
@@ -1706,6 +1710,35 @@ class IRCBot(irc.client.SimpleIRCClient):
                         message = f"{name}: {summary}"
                     except Exception:
                         message = f"{name}: Unable to extract data. Please try again later."
+            elif name in ['Housing']:
+                headers = {
+                    "User-Agent": f"IRCInvestmentBot/1.0 ({self.owner_email})",
+                    "Accept": "application/html, */*"
+                }
+
+                response = requests.get(url, headers=headers, timeout=10)
+
+                if response.status_code == 200:
+                    try:
+                        tree = html.fromstring(response.text)
+                        #entries = tree.xpath(f"//div[contains(@class, 'richtext')]/strong/following-sibling::text()")
+                        entries = tree.xpath(f"//div[contains(@class, 'richtext')]/strong")
+                        logger.debug("This worked at least")
+                        statements = {}
+
+                        for entry in entries:
+                            title = etree.tostring(entry)
+                            title = title.decode('ascii')
+                            title = re.sub('<[^<]+?>', '', title)
+                            statement = entry.xpath("normalize-space(following-sibling::text()[1])")
+                            statement = statement.split('.')[0].split('of ')[1]
+                            statements[title] = int(statement.replace(',', ''))
+
+                        summary = "; ".join(f"{k}: {v}" for k, v in statements.items())
+                        message = f"{name}: {summary}"
+                    except Exception as e:
+                        message = f"{name}: Unable to extract data. Please try again later."
+                        logger.debug(f"The exception from {name}: {str(e)}")
 
             connection.privmsg(channel, message)
 
