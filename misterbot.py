@@ -1721,9 +1721,7 @@ class IRCBot(irc.client.SimpleIRCClient):
                 if response.status_code == 200:
                     try:
                         tree = html.fromstring(response.text)
-                        #entries = tree.xpath(f"//div[contains(@class, 'richtext')]/strong/following-sibling::text()")
                         entries = tree.xpath(f"//div[contains(@class, 'richtext')]/strong")
-                        logger.debug("This worked at least")
                         statements = {}
 
                         for entry in entries:
@@ -1735,7 +1733,7 @@ class IRCBot(irc.client.SimpleIRCClient):
                             statements[title] = int(statement.replace(',', ''))
 
                         summary = "; ".join(f"{k}: {v}" for k, v in statements.items())
-                        message = f"{name}: {summary}"
+                        message = f"{name}: {summary}. Check {url} for more details."
                     except Exception as e:
                         message = f"{name}: Unable to extract data. Please try again later."
                         logger.debug(f"The exception from {name}: {str(e)}")
