@@ -1422,63 +1422,112 @@ class IRCBot(irc.client.SimpleIRCClient):
 
         news_items = []
 
-        try:
-            headers = {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/117.0.0.0 Safari/537.36'
-            }
+        if ticker == '.news':
+            try:
+                tickers = []
+                url = "https://finviz.com/news?v=3"
+                headers = {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/117.0.0.0 Safari/537.36'
+                }
 
-            url = f"https://finviz.com/quote.ashx?t={ticker}"
-            response = requests.get(url, headers=headers)
+                response = requests.get(url, headers=headers)
 
-            if response.status_code == 404:
-                url = ""
-                stock = yf.Ticker(ticker)
-                data = stock.info
+                if response.status_code == 200:
+                    logger.debug("Fetching all news items...")
+                    content = response.text
 
-                if len(data) < 2:
-                    connection.privmsg(channel, f"Securities / commodities ticker does not exist on either Finviz or Yahoo Finance.")
-                    return
+                    soup = BeautifulSoup(content, "html.parser")
 
-                news = stock.get_news(count=10, tab="all")
+                    for index, news_item in zip(range(10), soup.select('#news table > tr')):
+                        if len(news_items) == 5:
+                            break
 
-                if len(news) < 1:
-                    connection.privmsg(channel, f"We could not find any news items for symbol {ticker} on Yahoo Finance.")
-                    return
+                        news_item_ticker = news_item.select_one('a[data-boxover-ticker]').get('data-boxover-ticker')
 
-                for index, news_item in enumerate(news):
-                    if len(news_items) == 5:
-                        break
+                        if news_item_ticker in tickers:
+                            continue
 
-                    news_url = news_item['content']['canonicalUrl']['url']
-                    news_title = news_item['content']['title']
+                        tickers.append(news_item_ticker)
 
-                    news_item_dict = {
-                        'link': news_url,
-                        'title': news_title
-                    }
+                        news_item_dict = {
+                            'link': news_item.select_one('a.nn-tab-link').get('href'),
+                            'title': news_item.select_one('a.nn-tab-link').text
+                        }
 
-                    news_items.append(news_item_dict)
+                        if news_item_dict['link'].startswith('/'):
+                            news_item_dict['link'] = 'https://finviz.com' + news_item_dict['link']
 
-            if response.status_code == 200:
-                content = response.text
-                soup = BeautifulSoup(content, "html.parser")
-                for index, news_item in zip(range(5), soup.select('#news-table > tr')):
-                    news_item_dict = {
-                        'link': news_item.find('a').get('href'),
-                        'title': news_item.find('a').text
-                    }
+                        news_items.append(news_item_dict)
+                else:
+                    logger.debug(f"The status code for all news: {response.status_code}")
+            except Exception as e:
+                logger.debug(f"The error handling all news fetch: {str(e)}")
 
-                    if news_item_dict['link'].startswith('/'):
-                        news_item_dict['link'] = 'https://finviz.com' + news_item_dict['link']
+        logger.debug(f"The news item count: {len(news_items)}")
 
-                    news_items.append(news_item_dict)
-            elif response.status_code != 200 and len(news_items) < 1:
-                return [f"Error: {response.status_code} from Finviz"]
-        except Exception as e:
-            return [f"Exception fetching news: {str(e)}"]
+        if len(news_items) == 0 and ticker != '.news':
+            try:
+                headers = {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/117.0.0.0 Safari/537.36'
+                }
+
+                url = f"https://finviz.com/quote.ashx?t={ticker}"
+                response = requests.get(url, headers=headers)
+
+                if response.status_code == 404:
+                    url = ""
+                    stock = yf.Ticker(ticker)
+                    data = stock.info
+
+                    if len(data) < 2:
+                        connection.privmsg(channel, f"Securities / commodities ticker does not exist on either Finviz or Yahoo Finance.")
+                        return
+
+                    news = stock.get_news(count=10, tab="all")
+
+                    if len(news) < 1:
+                        connection.privmsg(channel, f"We could not find any news items for symbol {ticker} on Yahoo Finance.")
+                        return
+
+                    for index, news_item in enumerate(news):
+                        if len(news_items) == 5:
+                            break
+
+                        news_url = news_item['content']['canonicalUrl']['url']
+                        news_title = news_item['content']['title']
+
+                        news_item_dict = {
+                            'link': news_url,
+                            'title': news_title
+                        }
+
+                        news_items.append(news_item_dict)
+
+                if response.status_code == 200:
+                    content = response.text
+                    soup = BeautifulSoup(content, "html.parser")
+                    for index, news_item in zip(range(5), soup.select('#news-table > tr')):
+                        news_item_dict = {
+                            'link': news_item.find('a').get('href'),
+                            'title': news_item.find('a').text
+                        }
+
+                        if news_item_dict['link'].startswith('/'):
+                            news_item_dict['link'] = 'https://finviz.com' + news_item_dict['link']
+
+                        news_items.append(news_item_dict)
+                elif response.status_code != 200 and len(news_items) < 1:
+                    return [f"Error: {response.status_code} from Finviz"]
+            except Exception as e:
+                return [f"Exception fetching news: {str(e)}"]
 
         if len(news_items) < 1:
-            return [f"No news items for {ticker}"]
+            if ticker == '.news':
+                connection.privmsg(channel, f"No news items found.")
+            else:
+                connection.privmsg(channel, f"No news items found for {ticker}.")
+
+            return [f"No news items for {ticker}."]
 
         for news_item in news_items:
             connection.privmsg(channel, f"{news_item['link'].strip()} ({news_item['title'].strip()})")
