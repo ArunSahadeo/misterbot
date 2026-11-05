@@ -104,6 +104,7 @@ class IRCBot(irc.client.SimpleIRCClient):
             '.metals': self.handle_metals_prices,
             '.sector': self.handle_sector_company_listings,
             '.trends': self.handle_sector_news,
+            '.rates': self.handle_base_rates,
             '.t': self.handle_stock_info,
             '.market': self.handle_market_prices,
             '.markets': self.handle_market_prices,
@@ -1573,6 +1574,49 @@ class IRCBot(irc.client.SimpleIRCClient):
                 message_text = f"Earnings {label}: Error fetching data."
 
             connection.privmsg(channel, message_text)
+
+    def handle_base_rates(self, connection, sender, message, channel):
+        """Handle .rates command."""
+
+        headers = {
+            "User-Agent": f"IRCInvestmentBot/1.0 ({self.owner_email})",
+            "Accept": "application/html, */*"
+        }
+
+        url = "https://tradingeconomics.com/country-list/interest-rate"
+        message = ""
+        response = requests.get(url, headers=headers, timeout=10)
+
+        if response.status_code == 200:
+            html_content = response.text
+
+            try:
+                tree = html.fromstring(html_content)
+
+                countries = [
+                    'United States',
+                    'United Kingdom',
+                    'Euro Area'
+                ]
+
+                for index, country in enumerate(countries):
+                    is_last = index == len(countries) - 1
+                    base_rate = tree.xpath(f"//table//td[normalize-space() = '{country}']/following-sibling::td[1]")[0]
+                    base_rate_element = etree.tostring(base_rate)
+                    base_rate_element = base_rate_element.decode('ascii')
+                    base_rate_element = re.sub('<[^<]+?>', '', base_rate_element)
+                    base_rate = base_rate_element.strip()
+                    message += f"{country}: {base_rate}%"
+
+                    if not is_last:
+                        message += " "
+            except Exception as e:
+                logger.debug(f"The exception for .rates: {str(e)}")
+
+                if len(message) < 1:
+                    message = f"Unable to extract base rates. Please try again later."
+
+        connection.privmsg(channel, message)
 
     def fetch_latest_reports(self, connection, sender, message, channel):
         """Handle .reports command."""
