@@ -1575,6 +1575,9 @@ class IRCBot(irc.client.SimpleIRCClient):
 
             connection.privmsg(channel, message_text)
 
+        message = "Acronyms used: TNS (Time Not Specified); DNS (Date Not Specified); BMO (Before Market Open); AMC (After Market Close); TAS (Transfer Agent System)."
+        connection.privmsg(channel, message)
+
     def handle_base_rates(self, connection, sender, message, channel):
         """Handle .rates command."""
 
