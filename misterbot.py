@@ -1044,6 +1044,9 @@ class IRCBot(irc.client.SimpleIRCClient):
                     message = f"The requested command is using the Yahoo Finance API."
                 else:
                     message = 'No URIs are invoked.'
+
+                    if ".reports" in requested_command:
+                        message_2 = "Available reports: Jobs Report, CPI, PPI, PMI (Manufacturing), PMI (Services), PCE, Unemployment Claims, Housing."
             else:
                 message = f'{requested_command} does not exist. Make sure it is prefixed with a dot (.).'
         else:
