@@ -31,8 +31,46 @@ from helpers.SECCorporateRosterParser import SECCorporateRosterParser
 # Configure logging
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+IRC_MAX_LENGTH = 450  # Safe byte threshold for standard IRC line length
+_original_privmsg = irc.client.ServerConnection.privmsg
 
-ollama_server_url = 'http://localhost:11434/api/generate'
+def _global_safe_privmsg(self, target, message):
+  """Global hook replacing ServerConnection.privmsg to catch long messages."""
+  try:
+    encoded_msg = message.encode("utf-8")
+    if len(encoded_msg) > IRC_MAX_LENGTH:
+      raise irc.client.MessageTooLong(
+          f"Outgoing message to {target} exceeds limit ({len(encoded_msg)}"
+          " bytes)."
+      )
+
+    # Call the original method if within safe limits
+    _original_privmsg(self, target, message)
+
+  except irc.client.MessageTooLong as e:
+    # Log the error details along with the exact raw message content
+    logger.error(
+        f"MessageTooLong Error: {e}\n"
+        f"--- Raw Message Start ---\n"
+        f"{message}\n"
+        f"--- Raw Message End ---\n"
+        f"Stats: {len(message)} characters | {len(encoded_msg)} bytes"
+    )
+    # Graceful fallback message to the channel/user
+    _original_privmsg(
+        self,
+        target,
+        "[Error: Generated response was too long to transmit in a single line.]",
+    )
+
+  except Exception as e:
+    logger.error(
+        f"Unexpected error while sending message to {target}: {e}",
+        exc_info=True,
+    )
+
+# Apply the global monkey-patch
+irc.client.ServerConnection.privmsg = _global_safe_privmsg
 
 class ClosestScopeURLVisitor(ast.NodeVisitor):
     def __init__(self):
@@ -85,6 +123,7 @@ class IRCBot(irc.client.SimpleIRCClient):
         self.channels = config['channels']
         self.admins = config['admins']
         self.owner_email = config['owner_email']
+        self.capedge_session_token = config['keys']['capedge_session_token']
 
         self._channel = None
         self._target_user = None
@@ -1010,7 +1049,7 @@ class IRCBot(irc.client.SimpleIRCClient):
         if re.match("^\$", ticker):
             ticker = re.sub(r"^\$", "", ticker)
 
-        sec_corporate_roster_parser = SECCorporateRosterParser(ticker=ticker, user_agent_email=self.owner_email)
+        sec_corporate_roster_parser = SECCorporateRosterParser(ticker=ticker, user_agent_email=self.owner_email, capedge_session_token=self.capedge_session_token)
         final_roster = sec_corporate_roster_parser.run_pipeline()
         execs = []
         directors = []

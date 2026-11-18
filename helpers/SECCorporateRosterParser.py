@@ -6,7 +6,7 @@ from bs4.element import Comment
 import os
 
 class SECCorporateRosterParser:
-    def __init__(self, ticker, user_agent_email):
+    def __init__(self, ticker, user_agent_email, capedge_session_token):
         """
         Initializes the pipeline for a specific company ticker.
         The user_agent_email is mandatory to prevent the SEC from blocking requests.
@@ -19,16 +19,17 @@ class SECCorporateRosterParser:
         self.cik = None
         self.company_name = None
         self.recent_filings = None
+        self.capedge_session_token = capedge_session_token
 
         self.TITLE_MAP = {
             # CEO patterns
             r"^(?!.*?\bformer\b).*\b(ceo|chief executive officer|chief executive|md|managing director)\b": "CEO",
             # CFO patterns
             r"^(?!.*?\bformer\b).*\b(cfo|chief financial officer|chief financial)\b": "CFO",
-            # President / COO patterns
-            r"^(?!.*?\bformer\b).*\b(coo|chief operating officer|(?<!vice[\s\-])president)\b": "President / COO",
-            # Board Chair
-            r"^(?!.*?\bformer\b).*\b(chair)\b": "Board Chair",
+            # President / COO patterns: Matches COO, or President strictly NOT followed by qualifiers like "Global Affairs" or "Vice Chairman"
+            r"^(?!.*?\bformer\b).*\b(coo|chief operating officer|president(?!\s*(?:,|and)\s*(?:global|vice|chair|director)))\b": "President / COO",
+            # Board Chair / COB patterns
+            r"^(?!.*?\bformer\b).*\b(chair|cob|chairman|chairwoman)\b": "Board Chair",
             # Lead Independent Director
             r"^(?!.*?\bformer\b).*\b(lead independent director)\b": "Lead Independent Director",
         }
@@ -40,6 +41,7 @@ class SECCorporateRosterParser:
             "Group",
             "CFO",
             "CEO",
+            "COB",
             "Chairman",
             "Lead",
             "Executive",
@@ -91,7 +93,7 @@ class SECCorporateRosterParser:
         directors = dict(self.roster.get("directors", {}))
 
         board_keywords = re.compile(
-            r"\b(chair|director|board|lead independent)\b", re.IGNORECASE
+            r"\b(chair|director|board|lead independent|cob)\b", re.IGNORECASE
         )
         invalid_name_terms = {
             "departure", "officer", "item", "board", "form", "amendment",
@@ -117,17 +119,6 @@ class SECCorporateRosterParser:
                     del target_dict[prev_person]
             target_dict[name] = new_role
 
-        # NOTE ON [^.] GAPS BELOW: every pattern uses "[^.]*?" rather than ".*?"
-        # for the text between a captured name and the role/verb that follows it.
-        # This stops a lazy match from ever bleeding across a full stop into the
-        # next sentence (which is about a different person). Case-insensitivity
-        # is applied only to the connector words via inline "(?i:...)" groups,
-        # rather than to the whole pattern, so the Name/Role capture groups stay
-        # anchored to real Capitalised Words and don't also swallow ordinary
-        # lowercase text once IGNORECASE is in effect.
-
-        # 1. Capture Departures (e.g. "X will step down as CEO", or the "from"
-        #    half of "X will transition from role as CEO to ...")
         departure_pattern = re.compile(
             r"\b([A-Z][a-z]+\s+[A-Z][a-z]+)\b[^.]*?"
             r"(?i:transition\s+from|step\s+down\s+as|resigned\s+as|depart\s+from)\b[^.]*?"
@@ -139,26 +130,10 @@ class SECCorporateRosterParser:
             if is_valid_person_name(name) and name in executives:
                 del executives[name]
 
-        # 2. Capture Appointments / Transitions To. Each construction gets its
-        #    own explicit pattern instead of one pattern trying to cover every
-        #    verb with a loose "to|as" alternation - that loose version is what
-        #    caused "X will transition from his role as CEO to Executive Chair"
-        #    to be misread as X *becoming* CEO: the lazy match stopped at the
-        #    first "as" it found (the OLD role), never reaching the "to" that
-        #    introduces the new one.
         role_patterns = [
-            # "X ... appointed ... as ROLE" (e.g. "the Board appointed John
-            # Ternus ... as Chief Executive Officer")
             r"(?i:appointed)\s+([A-Z][a-z]+\s+[A-Z][a-z]+)\b[^.]*?(?i:as)\s+([A-Z][A-Za-z\s']+?)(?=\s*(?:(?i:of)|\.|,|(?i:and)\b|(?i:effective)\b))",
-            # "X will transition from ... to ROLE" - anchored on the literal
-            # "to" so it captures the destination role, not the one being left
             r"\b([A-Z][a-z]+\s+[A-Z][a-z]+)\b[^.]*?(?i:transition(?:ed|ing)?\s+from)\b[^.]*?(?i:to)\s+([A-Z][A-Za-z\s']+?)(?=\s*(?:(?i:of)|\.|,|(?i:effective)\b))",
-            # "X will serve as ROLE"
             r"\b([A-Z][a-z]+\s+[A-Z][a-z]+)\b[^.]*?(?i:serve)\s+(?i:as)\s+([A-Z][A-Za-z\s']+?)(?=\s*(?:(?i:of)|\.|,|(?i:effective)\b))",
-            # "X ... will become ROLE" - no "to"/"as" needed. This is the
-            # generic replacement for the old Art Levinson hardcoding: any
-            # director described this way (Lead Independent Director, Board
-            # Chair, etc.) is now picked up from the filing text itself.
             r"\b([A-Z][a-z]+\s+[A-Z][a-z]+)\b[^.]*?(?i:become)\s+([A-Z][A-Za-z\s']+?)(?=\s*(?:(?i:of)|\.|,|(?i:on)\b|(?i:effective)\b))",
         ]
 
@@ -173,20 +148,18 @@ class SECCorporateRosterParser:
                 if not is_valid_person_name(name):
                     continue
 
-                mapped_title = self.normalize_title(raw_title) or raw_title
+                mapped_title = self.normalize_title(raw_title)
+                if not mapped_title:
+                    continue
 
                 if board_keywords.search(raw_title):
-                    # Person moving to Board role (e.g. Tim Cook -> Executive Chair / Board Chair,
-                    # or Art Levinson -> Lead Independent Director)
                     if name in executives and mapped_title in ["Board Chair", "Lead Independent Director", "Director"]:
                         del executives[name]
 
                     assign_role_and_replace_predecessor(name, mapped_title, directors)
                 else:
-                    # Person appointed to C-Suite (e.g. John Ternus -> CEO)
                     assign_role_and_replace_predecessor(name, mapped_title, executives)
 
-        # 3. Handle dual appointments (e.g., CEO joining Board as standard director)
         if "member of the board" in raw_text.lower():
             for name in list(executives.keys()):
                 if name in raw_text and name not in directors:
@@ -195,10 +168,6 @@ class SECCorporateRosterParser:
         return {"executives": executives, "directors": directors}
 
     def fetch_cik_and_metadata(self):
-        """
-        Maps the ticker to its 10-digit CIK and downloads the master Submissions JSON
-        """
-        # 1. Fetch the master SEC ticker mapping registry
         mapping_url = "https://www.sec.gov/files/company_tickers.json"
         map_response = requests.get(mapping_url, headers=self.headers)
         
@@ -207,10 +176,8 @@ class SECCorporateRosterParser:
             
         ticker_data = map_response.json()
         
-        # 2. Extract CIK matching the requested ticker
         for company_index in ticker_data.values():
             if company_index["ticker"] == self.ticker:
-                # Pad to 10 digits as required by the submissions endpoint
                 self.cik = str(company_index["cik_str"]).zfill(10)
                 self.company_name = company_index["title"]
                 self.roster["company"] = self.company_name
@@ -219,7 +186,6 @@ class SECCorporateRosterParser:
         if not self.cik:
             raise Exception(f"Ticker '{self.ticker}' not found in SEC database.")
 
-        # 3. Download the central corporate submission registry history
         submissions_url = f"https://data.sec.gov/submissions/CIK{self.cik}.json"
         sub_response = requests.get(submissions_url, headers=self.headers)
         
@@ -230,14 +196,9 @@ class SECCorporateRosterParser:
         self.recent_filings = submissions_payload["filings"]["recent"]
 
     def find_target_filings(self):
-        """
-        Scans the historical timeline to locate the most recent DEF 14A proxy baseline
-        and accumulates all subsequent 8-K (Item 5.02) updates.
-        """
         target_records = {"proxy": None, "updates": []}
         proxy_index = None
         
-        # Find the latest Proxy Statement (Chronologically ordered, index 0 is most recent)
         for i, form in enumerate(self.recent_filings["form"]):
             if form == "DEF 14A":
                 target_records["proxy"] = {
@@ -247,11 +208,9 @@ class SECCorporateRosterParser:
                 proxy_index = i
                 break
                 
-        # Gather all 8-K amendments submitted *after* that baseline proxy statement dropped
         if proxy_index is not None:
             for i in range(0, proxy_index):
                 if self.recent_filings["form"][i] == "8-K":
-                    # Evaluates the associated items array for the specific corporate change code
                     triggered_items = str(self.recent_filings["items"][i])
                     if "5.02" in triggered_items:
                         target_records["updates"].append({
@@ -262,18 +221,14 @@ class SECCorporateRosterParser:
         return target_records
 
     def download_submission(self, record, download_html: bool = True):
-        """
-        Constructs and downloads the full HTML or raw text submission via the SEC Archive server
-        """
         accession_number = record["accession"]
         primary_document = record["primary_doc"]
-        unpadded_cik = str(int(self.cik)) # folders match stripping out leading zeros
+        unpadded_cik = str(int(self.cik))
         stripped_accession = accession_number.replace("-", "")
 
         if not download_html:
             primary_document = f"{accession_number}.txt"
         
-        # standard sec format for complete container text streams
         submission_url = f"https://www.sec.gov/Archives/edgar/data/{unpadded_cik}/{stripped_accession}/{primary_document}"
         print(f"Downloading {submission_url} ...")
         
@@ -282,7 +237,7 @@ class SECCorporateRosterParser:
             return response.text
         else:
             print(f"Warning: unable to fetch document {accession_number}. Code: {response.status_code}")
-            return none
+            return None
 
     def normalize_title(self, raw_title: str) -> str | None:
         if not raw_title:
@@ -326,15 +281,12 @@ class SECCorporateRosterParser:
                         title = re.split(r'\s{3}', name)[1]
                         name = re.split(r'\s{3}', name)[0]
 
-                title = self.normalize_title(title)
+                mapped_title = self.normalize_title(title)
 
-                if name and title:
+                if name and mapped_title:
                     name = name.replace('\xa0', ' ')
-
-                    if "CEO" in title and title not in response["executives"].values() and len(response["executives"]) < 1:
-                        response["executives"][name] = title
-                    elif "CEO" not in title:
-                        response["executives"][name] = title
+                    if mapped_title in ["CEO", "CFO", "President / COO"]:
+                        response["executives"][name] = mapped_title
 
         if len(response["executives"]) > 0:
             print(f"The executives thus far: {str(response['executives'])}")
@@ -383,10 +335,10 @@ class SECCorporateRosterParser:
 
                 updated_title = self.normalize_title(title)
                 sanitised_company_name = re.escape(self.company_name)
-                pattern = rf"\b(?:chairman|chairwoman|chair)\b.*?\b{sanitised_company_name}"
+                pattern = rf"\b(?:chairman|chairwoman|chair|cob)\b.*?\b{sanitised_company_name}"
                 regex = re.compile(pattern, re.IGNORECASE)
 
-                if updated_title == "CEO" and regex.search(title.lower()) and "former chair" not in title.lower():
+                if updated_title in ["CEO", "Board Chair"] and regex.search(title.lower()) and "former chair" not in title.lower():
                     title = "Board Chair"
                 else:
                     title = updated_title
@@ -410,10 +362,7 @@ class SECCorporateRosterParser:
         if not merged_str:
             return ("", "")
 
-        # Clean non-breaking spaces
         clean_str = merged_str.replace("\xa0", " ").strip()
-
-        # Search for the first title keyword boundary
         match = self.TITLE_PIVOT_PATTERN.search(clean_str)
 
         if match:
@@ -422,8 +371,129 @@ class SECCorporateRosterParser:
             title = clean_str[pivot_idx:].strip()
             return (name, title)
 
-        # Fallback if no keyword matched
         return (clean_str, "")
+
+    def fetch_and_parse_capedge(self, url: str, cookie_val: str):
+        from playwright.sync_api import sync_playwright
+
+        if "=" in cookie_val:
+            parts = cookie_val.split("=", 1)
+            cookie_name = parts[0].strip()
+            cookie_value = parts[1].strip()
+        else:
+            cookie_name = "__Secure-next-auth.session-token"
+            cookie_value = cookie_val.strip()
+
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            context = browser.new_context(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
+            )
+
+            context.add_cookies([{
+                "name": cookie_name,
+                "value": cookie_value,
+                "domain": "capedge.com",
+                "path": "/",
+                "secure": True,
+                "httpOnly": True
+            }])
+
+            page = context.new_page()
+
+            try:
+                print(f"[Playwright] Connecting to {url}...")
+                page.goto(url, wait_until="networkidle", timeout=30000)
+                page.wait_for_timeout(2000)
+            except Exception as e:
+                print(f"Error navigating with Playwright: {e}", file=sys.stderr)
+                browser.close()
+                sys.exit(1)
+
+            html_content = page.content()
+            browser.close()
+
+        executives = {}
+        directors = {}
+        all_records = []
+
+        def process_capedge_entry(name, raw_title):
+            title_lower = raw_title.lower()
+            mapped = self.normalize_title(raw_title)
+
+            if "director" in title_lower or mapped in ["Board Chair", "Lead Independent Director"]:
+                directors[name] = mapped if mapped in ["Board Chair", "Lead Independent Director"] else "Director"
+
+            if mapped in ["CEO", "CFO", "President / COO"]:
+                executives[name] = mapped
+
+        match = re.search(
+            r'"currentTableDefaultData"\s*:\s*(\{.*?\})\s*,\s*"trendsChartsDefaultData"',
+            html_content
+        )
+
+        if match:
+            try:
+                data_json = json.loads(match.group(1))
+                for item in data_json.get("data", []):
+                    owner = item.get("owner", {})
+                    name = owner.get("name")
+                    title = owner.get("title", "").strip()
+
+                    if not name:
+                        continue
+
+                    all_records.append({"name": name, "title": title})
+                    process_capedge_entry(name, title)
+
+                self.roster["executives"] = executives
+                self.roster["directors"] = directors
+                return executives, directors, all_records
+            except json.JSONDecodeError:
+                pass
+
+        soup = BeautifulSoup(html_content, "html.parser")
+        table = soup.find("table", {"data-test": "insider-current:DataTable"})
+
+        if table and table.find("tbody"):
+            for row in table.find("tbody").find_all("tr"):
+                cols = row.find_all("td")
+                if len(cols) >= 2:
+                    name = cols[0].get_text(strip=True)
+                    title = cols[1].get_text(strip=True)
+
+                    all_records.append({"name": name, "title": title})
+                    process_capedge_entry(name, title)
+
+        self.roster["executives"] = executives
+        self.roster["directors"] = directors
+        return executives, directors, all_records
+
+    def get_capedge_insider_url(self, identifier: str) -> str:
+        from curl_cffi import requests as c_requests
+
+        clean_id = identifier.strip().upper()
+        if clean_id.isdigit():
+            numeric_cik = str(int(clean_id))
+            return f"https://capedge.com/company/{numeric_cik}/insider-holdings"
+
+        search_url = f"https://capedge.com/api/search?q={clean_id}"
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+
+        try:
+            response = c_requests.get(search_url, headers=headers, impersonate="chrome120", timeout=10)
+            if response.status_code == 200:
+                results = response.json()
+                for item in results.get("companies", []):
+                    if item.get("ticker") == clean_id or item.get("symbol") == clean_id:
+                        cik = item.get("cik") or item.get("id")
+                        if cik:
+                            return f"https://capedge.com/company/{str(int(cik))}/insider-holdings"
+        except Exception as e:
+            print(f"Error resolving ticker via CapEdge API: {e}", file=sys.stderr)
+
+        print(f"Warning: Could not dynamically resolve '{identifier}' via API. Falling back to direct formatting.", file=sys.stderr)
+        return f"https://capedge.com/company/{clean_id}/insider-holdings"
 
     def parse_proxy_baseline_text(self, proxy_html_text):
         extracted_data = self.extract_company_officers(proxy_html_text)
@@ -433,17 +503,11 @@ class SECCorporateRosterParser:
         self.roster["directors"] = extracted_data.get("directors", {})
 
     def apply_8k_delta_changes(self, html_update_text):
-        """
-        Evaluates Item 5.02 text snippets from an 8-K to dynamically mutate 
-        the active executive and board lists.
-        """
         print(f"[{self.ticker}] Submitting 8-K text delta payload...")
 
         try:
-            # Send the cleaned, chunked 8-K text to Item 5.02 parsing method
             updated_data = self.parse_item_502_text(html_update_text)
 
-            # Update internal tracking structures with mutated deltas
             self.roster["executives"] = updated_data.get("executives", self.roster["executives"])
             self.roster["directors"] = updated_data.get("directors", self.roster["directors"])
             
@@ -451,13 +515,8 @@ class SECCorporateRosterParser:
             
         except Exception as e:
             print(f"Warning: Failed to process 8-K update delta: {str(e)}")
-            # Fall back to current roster state silently to prevent the IRC bot thread from crashing
 
     def run_pipeline(self):
-        """
-        Executes Step 3: Resolves assets, downloads files, extracts contents, 
-        and updates the final structural arrays.
-        """
         print(f"Starting tracking pipeline for {self.ticker}...")
         self.fetch_cik_and_metadata()
         targets = self.find_target_filings()
@@ -469,21 +528,23 @@ class SECCorporateRosterParser:
             print("Could not isolate a baseline Proxy filing (DEF 14A).")
             return self.roster
             
-        # 1. Pull down and process the baseline Proxy document
         print(f"Fetching baseline proxy document: {targets['proxy']['accession']}")
         proxy_submission_html = self.download_submission(targets['proxy'])
 
-        if len(proxy_submission_html) > 0:
+        if proxy_submission_html and len(proxy_submission_html) > 0:
             print(f"Found SEC DEF 14A filing for {self.ticker}")
-
-        self.parse_proxy_baseline_text(proxy_submission_html)
+            self.parse_proxy_baseline_text(proxy_submission_html)
         
-        # 2. Apply mid-year updates chronologically (Reversed from oldest up to the newest)
         print(f"Evaluating {len(targets['updates'])} mid-year 8-K amendments...")
         for update in reversed(targets["updates"]):
             print(f" -> Downloading amendment {update['accession']}...")
             update_text = self.download_submission(update)
-            self.apply_8k_delta_changes(update_text)
-            
+            if update_text:
+                self.apply_8k_delta_changes(update_text)
+
+        if not dict(self.roster.get("executives", {})) and not dict(self.roster.get("directors", {})):
+            capedge_insider_url = self.get_capedge_insider_url(self.cik)
+            self.fetch_and_parse_capedge(capedge_insider_url, self.capedge_session_token)
+
         print("Pipeline Complete!\n")
         return self.roster

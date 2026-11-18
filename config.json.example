@@ -9,7 +9,7 @@
 		],
 		"owner_email": "example@gmail.com",
 		"keys": {
-			"GROQ": ""
+			"capedge_session_token": ""
 		},
 		"channels": [
 				"##accounting",
