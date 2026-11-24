@@ -136,6 +136,7 @@ class IRCBot(irc.client.SimpleIRCClient):
             '!seen': self.handle_last_seen,
             '!quote': self.handle_stock_quote,
             '.q': self.handle_stock_quote,
+            '.stmts': self.fetch_three_statements,
             '.w': self.fetch_wikipedia_description,
             '.news': self.handle_stock_news,
             '.reports': self.fetch_latest_reports,
@@ -1884,6 +1885,52 @@ class IRCBot(irc.client.SimpleIRCClient):
             message_suffix = "Pass the command by itself in future to return all reports."
 
         message = f"All reports processed. {message_suffix}"
+        connection.privmsg(channel, message)
+
+    def fetch_three_statements(self, connection, sender, message, channel):
+        """Handle .stmts command."""
+
+        ticker = re.sub(r"^\.stmts", "", message)
+        ticker = re.sub(" ", "", ticker)
+
+        if re.match("^\$", ticker):
+            ticker = re.sub(r"^\$", "", ticker)
+
+        if ticker == "":
+            connection.privmsg(channel, f"Please enter a valid ticker, e.g. $MSFT, MSFT, $msft, msft")
+            return
+
+        stock = yf.Ticker(ticker)
+        data = stock.info
+
+        if len(data) < 2:
+            connection.privmsg(channel, f"Ticker does not exist.")
+            return
+
+        balance_sheet = stock.get_balance_sheet(freq="yearly")
+        income_statement = stock.get_income_stmt(freq="quarterly")
+
+        if type(balance_sheet).__name__ == "DataFrame":
+            selected = balance_sheet.loc[ [ row for row in [ "Cash And Cash Equivalents", "Total Assets", "Current Assets", "Current Liabilities", "Total Debt", "Total Liabilities Net Minority Interest", "Stockholders Equity", ] if row in balance_sheet.index ] ]
+            message = f"[ {ticker} | {selected.columns[0].strftime('%Y-%m-%d')}] " + ( " ".join(f"{k}: {v:,.0f};" for k, v in selected.iloc[:, 0].dropna().items()) or "No matching line items from the YTD balance sheet." )
+            connection.privmsg(channel, message)
+
+        if type(income_statement).__name__ == "DataFrame":
+            selected = income_statement.loc[ [ row for row in [ "Total Revenue", "Gross Profit", "Operating Expense", "Operating Income", "Net Income", ] if row in income_statement.index ] ].dropna(axis=1, how="all")
+
+            if selected.shape[0] > 0 and selected.shape[1] > 0:
+                col_date = selected.columns[0].strftime("%Y-%m-%d")
+                items = " ".join(
+                    f"{k}: {v:,.0f};" for k, v in selected.iloc[:, 0].dropna().items()
+                )
+
+                message = f"[ {ticker} | {col_date}] {items}"
+            else:
+                message = f"[ {ticker} ] No matching line items available from the most recently filed quarterly income statement."
+
+            connection.privmsg(channel, message)
+
+        message = f"Recent statements summarised for {ticker}. If you have any issues, please contact one of the following: {'; '.join(self.admins)}"
         connection.privmsg(channel, message)
 
     def handle_stock_quote(self, connection, sender, message, channel):
